@@ -4,6 +4,7 @@ Accurate offline records for performance, bugs, benchmarks, hill-climbing and
 RL—not live monitoring. Flat file, deep trace: spans nest to any depth, across
 processes, through `span`/`parent`. One UTF-8 JSON object per appended, flushed line;
 each run owns a fresh file. Flush is not crash persistence. No collector/sampling.
+Published archives may be gzip-compressed as `<name>.jsonl.gz`; the content is the identical JSONL. Readers accept both; writers always write plain JSONL.
 
 The flattrace rename changes names only: the envelope and line format remain
 v1, and files from earlier v1 writers stay valid. Only the environment names

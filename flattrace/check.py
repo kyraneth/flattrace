@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 """Envelope/span validation and tool-owned command coverage."""
+import gzip
 import json
 import math
 import re
@@ -50,24 +51,33 @@ def reject_constant(value):
     raise ValueError(f"invalid JSON number: {value}")
 
 
+def _lines(path, issues):
+    """Yield raw lines from plain JSONL or a gzip-published <name>.jsonl.gz."""
+    opener = gzip.open if str(path).endswith(".gz") else open
+    with opener(path, "rb") as stream:
+        try:
+            yield from stream
+        except (EOFError, OSError) as exc:  # truncated or corrupt archive
+            issues.append(f"incomplete gzip archive: {exc}")
+
+
 def read_trace(path):
     rows, issues = [], []
-    with open(path, "rb") as stream:
-        for number, line in enumerate(stream, 1):
-            try:
-                row = json.loads(line.decode("utf-8"), parse_constant=reject_constant)
-            except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-                prefix = "incomplete tail" if not line.endswith(b"\n") else "line"
-                issues.append(f"{prefix} {number}: {exc}")
-                continue
-            except ValueError as exc:
-                issues.append(f"line {number}: {exc}")
-                continue
-            try:
-                validate_event(row)
-                rows.append(row)
-            except (ValueError, TypeError) as exc:
-                issues.append(f"line {number}: {exc}")
+    for number, line in enumerate(_lines(path, issues), 1):
+        try:
+            row = json.loads(line.decode("utf-8"), parse_constant=reject_constant)
+        except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+            prefix = "incomplete tail" if not line.endswith(b"\n") else "line"
+            issues.append(f"{prefix} {number}: {exc}")
+            continue
+        except ValueError as exc:
+            issues.append(f"line {number}: {exc}")
+            continue
+        try:
+            validate_event(row)
+            rows.append(row)
+        except (ValueError, TypeError) as exc:
+            issues.append(f"line {number}: {exc}")
     if not rows:
         return rows, issues + ["missing run start and end"]
     first, last = rows[0], rows[-1]
