@@ -1,7 +1,8 @@
 # flattrace v1
 
 Accurate offline records for performance, bugs, benchmarks, hill-climbing and
-RL—not live monitoring. One UTF-8 JSON object per appended, flushed line;
+RL—not live monitoring. Flat file, deep trace: spans nest to any depth, across
+processes, through `span`/`parent`. One UTF-8 JSON object per appended, flushed line;
 each run owns a fresh file. Flush is not crash persistence. No collector/sampling.
 
 The flattrace rename changes names only: the envelope and line format remain

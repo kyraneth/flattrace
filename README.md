@@ -6,6 +6,45 @@ W3C traceparent IDs. Unfinished steps stay unfinished—even after SIGKILL.
 No collector, upload service, retention policy or live-monitoring dependency.
 Code and documentation are [MIT](LICENSE).
 
+## Does "flat" mean no depth?
+
+No. **Flat file, deep trace.** *Flat* describes the file: every line is one
+small, self-contained JSON event, so a writer just appends, you can `grep` or
+stream it, and a crash costs at most the last line. The trace itself is a tree
+as deep as you like, even across processes: each step carries its own `span`
+and its `parent`, and a child process joins the caller's trace through
+`FLATTRACE_TRACEPARENT`.
+
+A host tool runs a `preflight` step that launches a separate `my-tool` process:
+
+```
+my-addon  run
+└─ preflight
+   └─ my-tool  run                (child process, joined via FLATTRACE_TRACEPARENT)
+      └─ summary
+         ├─ file.open
+         ├─ file.index
+         └─ file.schema
+```
+
+On disk that is two ordinary files of flat lines (abridged here: `t`, `trace`,
+`run`, `seq` and `data` omitted, IDs shortened):
+
+```jsonl
+{"v":1,"tool":"my-addon","event":"preflight","state":"start","span":"e390…","parent":"df4e…"}
+{"v":1,"tool":"my-tool","event":"run","state":"start","span":"fc01…","parent":"e390…"}
+{"v":1,"tool":"my-tool","event":"summary","state":"start","span":"8b97…","parent":"fc01…"}
+{"v":1,"tool":"my-tool","event":"file.open","state":"start","span":"10ee…","parent":"8b97…"}
+{"v":1,"tool":"my-tool","event":"file.open","state":"end","span":"10ee…","parent":"8b97…","outcome":"ok"}
+{"v":1,"tool":"my-tool","event":"summary","state":"end","span":"8b97…","parent":"fc01…","outcome":"ok"}
+```
+
+Readers rebuild the tree by joining each event's `parent` to a `span`: the same
+model as OpenTelemetry spans, kept as plain lines in a file instead of being
+sent to a server. Reproduce it with
+`FLATTRACE_DIR=out PYTHONPATH=. python3 examples/nested/parent.py`, then
+`python3 -m flattrace check out/*.jsonl`.
+
 ## Quick start
 
 Use this checkout; registry packages are not published. Set `FLATTRACE_DIR` to a
