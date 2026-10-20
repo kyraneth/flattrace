@@ -11,6 +11,15 @@ export type Data = { [key: string]: Json };
 export type TraceError = { kind: string; message: string; [key: string]: Json };
 type Options = { argv?: string[]; data?: Data; directory?: string };
 export const CONTEXT_ENV = 'FLATTRACE_TRACEPARENT';
+export const LEVEL_ENV = 'FLATTRACE_LEVEL';
+function levelFromEnv(): [number, string | null] {
+  const raw = (process.env[LEVEL_ENV] ?? '').trim();
+  if (!raw) return [1, null];
+  const level = Number(raw);
+  // JSON/Number can represent integer levels exactly only in the safe range.
+  if (/^[0-9]+$/.test(raw) && Number.isSafeInteger(level)) return [level, null];
+  return [1, `invalid ${LEVEL_ENV} '${raw}' treated as 1`];
+}
 let warned = false;
 function warn(error: unknown) {
   if (!warned) {
@@ -81,6 +90,7 @@ export class Writer {
   run: string;
   readonly root: string;
   readonly path: string;
+  level = 1; // fromEnv sets the FLATTRACE_LEVEL value.
   private file: number | null;
   private bestEffort: boolean;
   private seq = 0;
@@ -89,10 +99,15 @@ export class Writer {
 
   static fromEnv(tool: string, version: string, options: Options = {}): Writer | null {
     const directory = process.env.FLATTRACE_DIR;
-    if (!directory) return null;
+    const [level, note] = levelFromEnv();
+    if (!directory || level === 0) return null;
+    let data: Data = { ...options.data, level };
+    if (note !== null) data = addNote(data, note);
     try {
       mkdirSync(directory, { recursive: true });
-      return new Writer(null, tool, version, { ...options, directory });
+      const writer = new Writer(null, tool, version, { ...options, data, directory });
+      writer.level = level;
+      return writer;
     } catch (error) {
       if (!ioError(error)) throw error;
       warn(error);

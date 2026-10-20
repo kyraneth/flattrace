@@ -144,10 +144,17 @@ def check_events(rows, contract, command=None):
         if command not in commands:
             issues.append(f"undeclared command {command!r}")
         required = [*required, *commands.get(command, [])]
-    present = set()
+    run_level = rows[0]["data"].get("level", 1)
+    run_level = run_level if isinstance(run_level, int) and not isinstance(run_level, bool) else 1
+    declared = lambda name: contract["events"].get(name, {}).get("level", 1)
+    required = [name for name in required if declared(name) <= run_level]
+    present, over = set(), set()
     for row in rows:
         name = row["event"]
         present.add(name)
+        if name in contract["events"] and declared(name) > run_level and name not in over:
+            over.add(name)
+            issues.append(f"level {declared(name)} event {name} in level {run_level} run")
         declaration = contract["events"].get(name)
         if declaration is None:
             issues.append(f"undeclared event {name}")
@@ -171,6 +178,9 @@ def read_events(path):
                 or not isinstance(event.get("fields"), dict)
                 or not all(isinstance(v, str) for v in event["fields"].values())):
             raise ValueError(f"invalid event declaration {name}")
+        level = event.get("level", 1)
+        if not isinstance(level, int) or isinstance(level, bool) or level < 1:
+            raise ValueError(f"invalid level for event {name}")
     for command, names in [("required", contract.get("required", [])), *contract.get("commands", {}).items()]:
         if not isinstance(names, list) or not all(isinstance(n, str) and n in contract["events"] for n in names):
             raise ValueError(f"invalid required events for {command}")

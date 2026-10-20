@@ -5,6 +5,18 @@ use std::{collections::BTreeMap, fs::{File, OpenOptions}, io::{self, Read, Write
           path::Path, time::{Instant, SystemTime, UNIX_EPOCH}};
 
 pub const CONTEXT_ENV: &str = "FLATTRACE_TRACEPARENT";
+pub const LEVEL_ENV: &str = "FLATTRACE_LEVEL";
+fn level_from_env() -> (u64, Option<String>) {
+    let raw = std::env::var_os(LEVEL_ENV).unwrap_or_default();
+    let raw = raw.to_string_lossy();
+    let raw = raw.trim();
+    if raw.is_empty() { return (1, None); }
+    if raw.bytes().all(|b| b.is_ascii_digit()) {
+        // u64 is the integer representation used by this writer and serde_json.
+        if let Ok(level) = raw.parse::<u64>() { return (level, None); }
+    }
+    (1, Some(format!("invalid {LEVEL_ENV} '{raw}' treated as 1")))
+}
 static WARNED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 fn warn(error: &io::Error) {
     let pid = std::process::id();
@@ -89,7 +101,7 @@ pub fn sanitize_argv(argv: Vec<String>) -> Vec<String> {
 
 pub struct Writer {
     file: Option<File>, best_effort: bool, tool: String, version: String, run: String, trace: String,
-    root: String, flags: String, pid: u32, seq: u64,
+    root: String, flags: String, pid: u32, seq: u64, level: u64,
     active: BTreeMap<String, (String, Option<String>, Instant)>,
 }
 impl Writer {
@@ -99,12 +111,18 @@ impl Writer {
     pub fn create_with_data(path: &Path, tool: &str, version: &str, argv: Vec<String>, host: &str, data: Value) -> io::Result<Self> {
         Self::create_at(path, tool, version, argv, host, data, id(16)?, false)
     }
-    /// Products use this entry point: off without FLATTRACE_DIR; sink failures never fail the product.
-    pub fn from_env(tool: &str, version: &str, argv: Vec<String>, host: &str, data: Value) -> io::Result<Option<Self>> {
+    /// Products use this entry point: off without FLATTRACE_DIR or at level 0;
+    /// sink failures never fail the product.
+    pub fn from_env(tool: &str, version: &str, argv: Vec<String>, host: &str, mut data: Value) -> io::Result<Option<Self>> {
+        let (level, note) = level_from_env();
+        if level == 0 { return Ok(None); }
         let directory = match std::env::var_os("FLATTRACE_DIR") {
             Some(v) if !v.is_empty() => std::path::PathBuf::from(v),
             _ => return Ok(None),
         };
+        if !data.is_object() { return Err(invalid("data must be an object")); }
+        data["level"] = json!(level);
+        if let Some(note) = note { add_note(&mut data, &note); }
         if tool.is_empty() || !tool.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-') {
             return Err(invalid("environment writer tool must be a lowercase slug"));
         }
@@ -117,7 +135,7 @@ impl Writer {
             stamp.push('Z');
             let path = directory.join(format!("{stamp}-{tool}-{run}.jsonl"));
             match Self::create_at(&path, tool, version, argv.clone(), host, data.clone(), run, true) {
-                Ok(w) => return Ok(Some(w)),
+                Ok(mut w) => { w.level = level; return Ok(Some(w)); },
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
                 Err(e) if e.kind() != io::ErrorKind::InvalidInput => { warn(&e); return Ok(None); },
                 Err(e) => return Err(e),
@@ -135,7 +153,7 @@ impl Writer {
         let mut w = Self {
             file: Some(OpenOptions::new().create_new(true).append(true).open(path)?), best_effort,
             tool: tool.into(), version: version.into(), run, trace,
-            root: id(8)?, flags, pid: std::process::id(), seq: 0, active: BTreeMap::new(),
+            root: id(8)?, flags, pid: std::process::id(), seq: 0, level: 1, active: BTreeMap::new(),
         };
         let root = w.root.clone();
         data["argv"] = json!(sanitize_argv(argv));
@@ -183,6 +201,7 @@ impl Writer {
         self.active.insert(span.clone(), (event.into(), parent, Instant::now()));
         Ok(span)
     }
+    pub fn level(&self) -> u64 { self.level }
     pub fn root_span(&self) -> &str { &self.root }
     pub fn trace_id(&self) -> &str { &self.trace }
     pub fn traceparent(&self, span: Option<&str>) -> io::Result<String> {
@@ -339,6 +358,81 @@ mod tests {
         std::fs::write(&blocked, "not a directory").unwrap();
         std::env::set_var("FLATTRACE_DIR", &blocked);
         assert!(Writer::from_env("test", "1", vec![], "host", json!({})).unwrap().is_none());
+    }
+    fn level_case(raw: Option<&str>, expected: u64, note: bool, inherit: bool) {
+        let directory = target().with_extension("dir");
+        let mut command = std::process::Command::new(std::env::current_exe().unwrap());
+        command.args(["--exact", "tests::level_child", "--nocapture"])
+            .env("FLATTRACE_TEST_LEVEL_DIRECTORY", &directory)
+            .env("FLATTRACE_TEST_EXPECTED_LEVEL", expected.to_string())
+            .env("FLATTRACE_TEST_LEVEL_NOTE", note.to_string())
+            .env("FLATTRACE_TEST_LEVEL_INHERIT", inherit.to_string())
+            .env_remove(CONTEXT_ENV).env_remove(LEVEL_ENV);
+        if let Some(raw) = raw { command.env(LEVEL_ENV, raw); }
+        let result = command.output().unwrap();
+        assert!(result.status.success(), "{} {}", String::from_utf8_lossy(&result.stdout), String::from_utf8_lossy(&result.stderr));
+        assert!(result.stderr.is_empty(), "{}", String::from_utf8_lossy(&result.stderr));
+        if expected == 0 { assert!(!directory.exists()); }
+        else { std::fs::remove_dir_all(directory).unwrap(); }
+    }
+    #[test]
+    fn level_zero_writes_nothing() { level_case(Some("0"), 0, false, false); }
+    #[test]
+    fn default_level_is_one_and_recorded() {
+        for raw in [None, Some(""), Some("  ")] { level_case(raw, 1, false, false); }
+    }
+    #[test]
+    fn invalid_level_is_one_with_note() {
+        // One beyond u64's representable range must not stop product work.
+        for raw in ["loud", "-1", "+2", "1.5", "18446744073709551616"] {
+            level_case(Some(raw), 1, true, false);
+        }
+    }
+    #[test]
+    fn numeric_level_is_recorded() {
+        level_case(Some(" 002 "), 2, false, false);
+        level_case(Some(&u64::MAX.to_string()), u64::MAX, false, false);
+    }
+    #[test]
+    fn child_inherits_level() { level_case(Some("2"), 2, false, true); }
+    #[test]
+    fn level_child() {
+        // Run only in an isolated subprocess: no process-global env races.
+        let directory = match std::env::var("FLATTRACE_TEST_LEVEL_DIRECTORY") { Ok(v) => v, Err(_) => return };
+        let expected: u64 = std::env::var("FLATTRACE_TEST_EXPECTED_LEVEL").unwrap().parse().unwrap();
+        std::env::set_var("FLATTRACE_DIR", &directory);
+        if expected == 0 {
+            std::env::set_var(CONTEXT_ENV, "bad");
+            assert!(Writer::from_env("test", "1", vec![], "host", json!({})).unwrap().is_none());
+            assert!(!Path::new(&directory).exists());
+            return;
+        }
+        let w = Writer::from_env("test", "1", vec![], "host", json!({"notes":"caller note", "level":0})).unwrap().unwrap();
+        assert_eq!(w.level(), expected);
+        let path = std::fs::read_dir(&directory).unwrap().map(|e| e.unwrap().path())
+            .find(|p| p.file_name().unwrap().to_string_lossy().ends_with(&format!("-{}.jsonl", w.run))).unwrap();
+        let rows: Vec<Value> = std::fs::read_to_string(&path).unwrap().lines().map(|s| serde_json::from_str(s).unwrap()).collect();
+        assert_eq!(rows[0]["data"]["level"], expected);
+        if std::env::var("FLATTRACE_TEST_LEVEL_NOTE").unwrap() == "true" {
+            let raw = std::env::var(LEVEL_ENV).unwrap();
+            assert_eq!(rows[0]["data"]["notes"], json!(["caller note", format!("invalid {LEVEL_ENV} '{}' treated as 1", raw.trim())]));
+        } else { assert_eq!(rows[0]["data"]["notes"], "caller note"); }
+        if std::env::var("FLATTRACE_TEST_LEVEL_INHERIT").unwrap() == "true" {
+            let child_dir = Path::new(&directory).join("child");
+            let result = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "tests::level_child", "--nocapture"])
+                .env("FLATTRACE_TEST_LEVEL_DIRECTORY", &child_dir)
+                .env("FLATTRACE_TEST_LEVEL_INHERIT", "false")
+                .env(CONTEXT_ENV, w.traceparent(None).unwrap())
+                // Command inherits FLATTRACE_LEVEL without overriding it.
+                .output().unwrap();
+            assert!(result.status.success(), "{} {}", String::from_utf8_lossy(&result.stdout), String::from_utf8_lossy(&result.stderr));
+            let child_path = std::fs::read_dir(&child_dir).unwrap().next().unwrap().unwrap().path();
+            let child: Value = serde_json::from_str(std::fs::read_to_string(child_path).unwrap().lines().next().unwrap()).unwrap();
+            assert_eq!(child["trace"], w.trace);
+            assert_eq!(child["parent"], w.root);
+        }
+        w.finish("ok").unwrap();
     }
     #[test]
     fn drop_leaves_run_unfinished_and_bad_context_is_rejected() {

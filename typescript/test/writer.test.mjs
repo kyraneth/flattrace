@@ -86,6 +86,88 @@ test('off does no I/O, invalid context fails, unwritable location warns once and
   assert.ok(!readdirSync(dir).includes('bad.jsonl'));
 });
 
+test('level zero does no trace I/O even with a directory and invalid context', t => {
+  const dir = join(fixture(t), 'absent');
+  const result = run(`
+    if (Writer.fromEnv('tool', '1') !== null) throw Error('enabled');
+  `, { ...process.env, FLATTRACE_DIR: dir, FLATTRACE_LEVEL: '0', FLATTRACE_TRACEPARENT: 'bad' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '');
+  assert.throws(() => readdirSync(dir), /ENOENT/);
+});
+
+test('default and empty levels are one and recorded', t => {
+  for (const [index, level] of [undefined, '', '  '].entries()) {
+    const dir = join(fixture(t), String(index));
+    const env = { ...process.env, FLATTRACE_DIR: dir };
+    delete env.FLATTRACE_TRACEPARENT;
+    if (level === undefined) delete env.FLATTRACE_LEVEL;
+    else env.FLATTRACE_LEVEL = level;
+    const result = run(`
+      const w = Writer.fromEnv('tool', '1', { data: { level: 0 } });
+      console.log(w.level); w.close();
+    `, env);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), '1');
+    const data = rows(join(dir, readdirSync(dir)[0]))[0].data;
+    assert.equal(data.level, 1);
+    assert.equal(data.notes, undefined);
+  }
+});
+
+test('invalid levels default to one with a note preserving caller notes', t => {
+  // The final case exceeds JavaScript Number's exact integer representation.
+  for (const raw of ['loud', '-1', '+2', '1.5', '9007199254740992']) {
+    const dir = fixture(t);
+    const result = run(`
+      const w = Writer.fromEnv('tool', '1', { data: { notes: 'caller note' } });
+      console.log(w.level); w.close();
+    `, { ...process.env, FLATTRACE_DIR: dir, FLATTRACE_LEVEL: raw, FLATTRACE_TRACEPARENT: undefined });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout.trim(), '1');
+    const data = rows(join(dir, readdirSync(dir)[0]))[0].data;
+    assert.equal(data.level, 1);
+    assert.deepEqual(data.notes, ['caller note', `invalid FLATTRACE_LEVEL '${raw}' treated as 1`]);
+  }
+});
+
+test('all-digit levels are recorded as integers', t => {
+  for (const raw of [' 002 ', String(Number.MAX_SAFE_INTEGER)]) {
+    const dir = fixture(t);
+    const result = run(`
+      const w = Writer.fromEnv('tool', '1'); console.log(w.level); w.close();
+    `, { ...process.env, FLATTRACE_DIR: dir, FLATTRACE_LEVEL: raw, FLATTRACE_TRACEPARENT: undefined });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(Number(result.stdout.trim()), Number(raw));
+    const data = rows(join(dir, readdirSync(dir)[0]))[0].data;
+    assert.equal(data.level, Number(raw));
+    assert.equal(data.notes, undefined);
+  }
+});
+
+test('children inherit the level through childEnv', t => {
+  const dir = fixture(t);
+  const result = run(`
+    import { spawnSync } from 'node:child_process';
+    const parent = Writer.fromEnv('parent', '1');
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e',
+      ${JSON.stringify(`import { Writer } from ${JSON.stringify(moduleUrl)};
+        const child = Writer.fromEnv('child', '1'); console.log(child.level); child.close();`)}
+    ], { env: parent.childEnv(), encoding: 'utf8' });
+    if (child.status !== 0) throw Error(child.stderr);
+    console.log(parent.level, child.stdout.trim()); parent.close();
+  `, { ...process.env, FLATTRACE_DIR: dir, FLATTRACE_LEVEL: '2', FLATTRACE_TRACEPARENT: undefined });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout.trim(), '2 2');
+  const starts = readdirSync(dir).map(name => rows(join(dir, name))[0]);
+  assert.equal(starts.length, 2);
+  assert.ok(starts.every(row => row.data.level === 2));
+  const parent = starts.find(row => row.tool === 'parent');
+  const child = starts.find(row => row.tool === 'child');
+  assert.equal(child.trace, parent.trace);
+  assert.equal(child.parent, parent.span);
+});
+
 test('sink failure is nonfatal only for environment writers', t => {
   // Linux /dev/full reliably reproduces a full sink, even when tests run as root.
   const dir = fixture(t);

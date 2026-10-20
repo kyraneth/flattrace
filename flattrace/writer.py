@@ -15,6 +15,7 @@ from .check import validate_event
 from .sanitize import sanitize_argv
 
 CONTEXT_ENV = "FLATTRACE_TRACEPARENT"
+LEVEL_ENV = "FLATTRACE_LEVEL"
 _warned = False
 
 
@@ -65,6 +66,16 @@ def context(value):
     return match.groups()
 
 
+def level_from_env():
+    """FLATTRACE_LEVEL: 0 off, 1 default (rich, no noise), 2+ debug firehose."""
+    raw = os.environ.get(LEVEL_ENV, "").strip()
+    if not raw:
+        return 1, None
+    if raw.isdigit():
+        return int(raw), None
+    return 1, f"invalid {LEVEL_ENV} {raw!r} treated as 1"
+
+
 def new_id(size):
     value = secrets.token_hex(size)
     return value if int(value, 16) else new_id(size)
@@ -74,11 +85,17 @@ class Writer:
     @classmethod
     def from_env(cls, tool, tool_version, *, argv=None, data=None):
         directory = os.environ.get("FLATTRACE_DIR")
-        if not directory:
+        level, note = level_from_env()
+        if not directory or level == 0:
             return None
+        data = {**({} if data is None else data), "level": level}
+        if note is not None:
+            data = add_note(data, note)
         try:
             Path(directory).mkdir(parents=True, exist_ok=True)
-            return cls(None, tool, tool_version, argv=argv, data=data, _directory=directory)
+            writer = cls(None, tool, tool_version, argv=argv, data=data, _directory=directory)
+            writer.level = level
+            return writer
         except OSError as exc:
             warn(exc)
             return None
@@ -88,6 +105,7 @@ class Writer:
         self.trace, self.parent, self.flags = (
             context(inherited) if inherited is not None else (new_id(16), None, "00"))
         self.tool, self.tool_version = tool, tool_version
+        self.level = 1  # from_env sets the FLATTRACE_LEVEL value.
         self.run, self.root = new_id(16), new_id(8)
         self.active = {}
         self.seq = 0

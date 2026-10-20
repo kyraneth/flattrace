@@ -117,6 +117,37 @@ Tool tests own payload meaning and command/branch coverage, not a second schema.
 Analysis can derive disposable paired-span rows (start, duration, outcome,
 unfinished) keyed by `(trace, run, span)`; raw lines remain the only record.
 
+## Detail levels
+
+`FLATTRACE_LEVEL` sets how much a run records; children inherit it like
+`FLATTRACE_DIR`. Unset/empty is `1`. `0` means no trace I/O even when
+`FLATTRACE_DIR` is set. Non-digit values are treated as `1` with a run note.
+Values outside a writer's exact native integer representation use the same
+fallback (Rust: `u64`; TypeScript: safe integer; Python: arbitrary precision).
+Environment writers record the effective value as run-start `data.level`; the
+tool, not the writer, decides what to emit at each level.
+
+- **1, default: rich, no noise.** Every action/command span with its outcome
+  and decisions; state transitions; aggregates in place of high-frequency
+  streams; the full run-start `data.env`. A level-1 trace should explain what
+  happened and why without a firehose.
+- **2+, debug.** Additionally every raw event (each poll, redraw, property
+  write). Tools may define finer meanings above 2.
+
+Aggregates are ordinary events with these `data` conventions, so readers need
+no new envelope field:
+
+| Record | Shape |
+|---|---|
+| Coalesced repeats | Any point/span with `count` (integer ≥1: how many occurrences it stands for) and optional `first_t`/`last_t`. An edit adds `target`, `key`, `old` (before the first), `new` (after the last). |
+| Transition | Point with `from` and `to`; emit on change only (e.g. a poll result or UI state flipping), never per poll. |
+| Window summary | Span bounding the window (e.g. `playback.window`); its end carries `stats: {metric: {unit, n, p50, p95, max}}` plus plain counters such as `dropped_frames`. Percentiles are over the window's samples. |
+| Deduplicated error | Point carrying `error` `{kind, message}` plus `where` (`file:line`), `count`, `first_t`, `last_t`; one per distinct `kind` + `where` per run. |
+
+In `flattrace-events.json` an event may declare `level` (default `1`).
+`check --events` reports a higher-level event found in a lower-level run and
+does not require events above the run's level.
+
 ## Sharing and evolution
 
 Never supply credentials: tools sanitize argv/custom secret flags before capture;
