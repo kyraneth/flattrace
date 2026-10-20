@@ -1,15 +1,15 @@
 {
-  "name": "steptrace",
+  "name": "flattrace",
   "version": "0.1.0",
   "private": true,
   "description": "Small local JSONL traces with cross-process parentage",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/kyraneth/steptrace.git",
+    "url": "git+https://github.com/kyraneth/flattrace.git",
     "directory": "typescript"
   },
-  "homepage": "https://github.com/kyraneth/steptrace",
-  "bugs": "https://github.com/kyraneth/steptrace/issues",
+  "homepage": "https://github.com/kyraneth/flattrace",
+  "bugs": "https://github.com/kyraneth/flattrace/issues",
   "author": "Mario Hawat <4396100+kyraneth@users.noreply.github.com>",
   "keywords": ["tracing", "jsonl", "diagnostics"],
   "files": ["writer.ts", "README.md", "LICENSE"],

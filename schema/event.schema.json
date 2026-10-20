@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "steptrace v1 envelope",
+  "title": "flattrace v1 envelope",
   "type": "object",
   "required": ["v", "tool", "tool_version", "run", "trace", "span", "parent", "event", "state", "t", "data"],
   "additionalProperties": true,

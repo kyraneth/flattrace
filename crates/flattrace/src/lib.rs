@@ -4,12 +4,12 @@ use serde_json::{json, Value};
 use std::{collections::BTreeMap, fs::{File, OpenOptions}, io::{self, Read, Write},
           path::Path, time::{Instant, SystemTime, UNIX_EPOCH}};
 
-pub const CONTEXT_ENV: &str = "STEPTRACE_TRACEPARENT";
+pub const CONTEXT_ENV: &str = "FLATTRACE_TRACEPARENT";
 static WARNED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 fn warn(error: &io::Error) {
     let pid = std::process::id();
     if WARNED.swap(pid, std::sync::atomic::Ordering::Relaxed) != pid {
-        let _ = writeln!(io::stderr(), "steptrace: tracing disabled: {error}");
+        let _ = writeln!(io::stderr(), "flattrace: tracing disabled: {error}");
     }
 }
 fn invalid(message: &str) -> io::Error { io::Error::new(io::ErrorKind::InvalidInput, message) }
@@ -32,7 +32,7 @@ fn context(value: &str) -> io::Result<(String, Option<String>, String)> {
     let p: Vec<_> = value.split('-').collect();
     if p.len() != 4 || p[0] != "00" || !hex(p[1], 32, true)
         || !hex(p[2], 16, true) || !hex(p[3], 2, false) {
-        return Err(invalid("invalid STEPTRACE_TRACEPARENT"));
+        return Err(invalid("invalid FLATTRACE_TRACEPARENT"));
     }
     Ok((p[1].into(), Some(p[2].into()), p[3].into()))
 }
@@ -99,9 +99,9 @@ impl Writer {
     pub fn create_with_data(path: &Path, tool: &str, version: &str, argv: Vec<String>, host: &str, data: Value) -> io::Result<Self> {
         Self::create_at(path, tool, version, argv, host, data, id(16)?, false)
     }
-    /// Products use this entry point: off without STEPTRACE_DIR; sink failures never fail the product.
+    /// Products use this entry point: off without FLATTRACE_DIR; sink failures never fail the product.
     pub fn from_env(tool: &str, version: &str, argv: Vec<String>, host: &str, data: Value) -> io::Result<Option<Self>> {
-        let directory = match std::env::var_os("STEPTRACE_DIR") {
+        let directory = match std::env::var_os("FLATTRACE_DIR") {
             Some(v) if !v.is_empty() => std::path::PathBuf::from(v),
             _ => return Ok(None),
         };
@@ -130,7 +130,7 @@ impl Writer {
         let (trace, parent, flags) = match std::env::var(CONTEXT_ENV) {
             Ok(v) => context(&v)?,
             Err(std::env::VarError::NotPresent) => (id(16)?, None, "00".into()),
-            Err(_) => return Err(invalid("invalid STEPTRACE_TRACEPARENT")),
+            Err(_) => return Err(invalid("invalid FLATTRACE_TRACEPARENT")),
         };
         let mut w = Self {
             file: Some(OpenOptions::new().create_new(true).append(true).open(path)?), best_effort,
@@ -251,7 +251,7 @@ mod tests {
         assert!(rows[3]["took_ms"].is_number());
         assert_eq!(rows[4]["state"], "end");
         let checked = std::process::Command::new("python3")
-            .args(["-m", "steptrace", "check"]).arg(&path)
+            .args(["-m", "flattrace", "check"]).arg(&path)
             .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
             .output().unwrap();
         assert!(checked.status.success(), "{}", String::from_utf8_lossy(&checked.stdout));
@@ -290,7 +290,7 @@ mod tests {
         assert_eq!(rows[3]["data"]["late_span"], span);
         assert_eq!(rows[3]["data"]["notes"], json!(["caller note", "point after span end"]));
         assert_eq!(rows[0]["data"]["argv"].as_array().unwrap().last().unwrap(), "--token=<redacted>");
-        let checked = std::process::Command::new("python3").args(["-m", "steptrace", "check"]).arg(&path)
+        let checked = std::process::Command::new("python3").args(["-m", "flattrace", "check"]).arg(&path)
             .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).output().unwrap();
         assert!(checked.status.success(), "{}", String::from_utf8_lossy(&checked.stdout));
         std::fs::remove_file(path).unwrap();
@@ -300,19 +300,19 @@ mod tests {
         let directory = target().with_extension("dir");
         let result = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "tests::environment_child", "--nocapture"])
-            .env("STEPTRACE_TEST_DIRECTORY", &directory)
+            .env("FLATTRACE_TEST_DIRECTORY", &directory)
             .env(CONTEXT_ENV, "00-11111111111111111111111111111111-2222222222222222-01").output().unwrap();
         assert!(result.status.success(), "{} {}", String::from_utf8_lossy(&result.stdout), String::from_utf8_lossy(&result.stderr));
-        assert_eq!(String::from_utf8_lossy(&result.stderr).matches("steptrace: tracing disabled").count(), 1);
+        assert_eq!(String::from_utf8_lossy(&result.stderr).matches("flattrace: tracing disabled").count(), 1);
         std::fs::remove_dir_all(directory).unwrap();
     }
     #[test]
     fn environment_child() {
         // Isolated subprocess so env changes cannot race the other tests.
-        let directory = match std::env::var("STEPTRACE_TEST_DIRECTORY") { Ok(v) => v, Err(_) => return };
-        std::env::remove_var("STEPTRACE_DIR");
+        let directory = match std::env::var("FLATTRACE_TEST_DIRECTORY") { Ok(v) => v, Err(_) => return };
+        std::env::remove_var("FLATTRACE_DIR");
         assert!(Writer::from_env("test", "1", vec![], "host", json!({})).unwrap().is_none());
-        std::env::set_var("STEPTRACE_DIR", &directory);
+        std::env::set_var("FLATTRACE_DIR", &directory);
         let mut w = Writer::from_env("test", "1", vec![], "host", json!({"task":"frames", "variant":"base"})).unwrap().unwrap();
         assert_eq!(w.trace, "11111111111111111111111111111111");
         assert!(w.traceparent(None).unwrap().ends_with("-01"));
@@ -327,7 +327,7 @@ mod tests {
         let rows: Vec<Value> = std::fs::read_to_string(&path).unwrap().lines().map(|s| serde_json::from_str(s).unwrap()).collect();
         assert_eq!(rows[0]["run"], run);
         assert_eq!(rows[0]["data"]["task"], "frames");
-        let checked = std::process::Command::new("python3").args(["-m", "steptrace", "check"]).arg(&path)
+        let checked = std::process::Command::new("python3").args(["-m", "flattrace", "check"]).arg(&path)
             .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).output().unwrap();
         assert!(checked.status.success(), "{}", String::from_utf8_lossy(&checked.stdout));
         let mut failing = Writer::from_env("test", "1", vec![], "host", json!({})).unwrap().unwrap();
@@ -337,7 +337,7 @@ mod tests {
         failing.finish("ok").unwrap();
         let blocked = Path::new(&directory).join("blocked");
         std::fs::write(&blocked, "not a directory").unwrap();
-        std::env::set_var("STEPTRACE_DIR", &blocked);
+        std::env::set_var("FLATTRACE_DIR", &blocked);
         assert!(Writer::from_env("test", "1", vec![], "host", json!({})).unwrap().is_none());
     }
     #[test]

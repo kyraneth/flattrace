@@ -20,7 +20,7 @@ Do not dump an environment or credentials. Export also redacts this object.
 | `model.requested_effort` | Requested reasoning setting, not acceptance proof |
 
 OpenTelemetry resource names are reused where meanings match. Kernel, build,
-library, agent, harness and requested-effort keys are steptrace conventions,
+library, agent, harness and requested-effort keys are flattrace conventions,
 not a claim that OpenTelemetry defines them. No machine scan or hashing is
 required. Record effective model/settings changes on the corresponding spans.
 A run header cannot represent all later changes. Unknown accounting is null,

@@ -1,4 +1,4 @@
-# steptrace for TypeScript
+# flattrace for TypeScript
 
 Dependency-free synchronous JSONL writer for Node >=22.18 with native type
 stripping. This is source preparation; the npm package is not published.
@@ -13,7 +13,7 @@ if (w) {
 }
 ```
 
-Set `STEPTRACE_DIR` to enable recording; unset/empty means off. Pass
+Set `FLATTRACE_DIR` to enable recording; unset/empty means off. Pass
 `w.childEnv(span)` to child processes. Never put credentials into trace payloads;
-export and review before sharing. See the [repository](https://github.com/kyraneth/steptrace)
+export and review before sharing. See the [repository](https://github.com/kyraneth/flattrace)
 for the format, checker, export command and real Oxblend examples. MIT.

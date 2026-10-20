@@ -1,7 +1,7 @@
 # Real Oxblend 1.3.0 traces
 
 Freshly recorded on 2026-10-20 using public Blender demo files only, then passed
-through `python3 -m steptrace export`. Paths and hosts are placeholders; fresh
+through `python3 -m flattrace export`. Paths and hosts are placeholders; fresh
 trace/run/span IDs, parentage, timings, outcomes and unfinished evidence remain.
 No source `.blend`, texture, raw trace or stdout report is redistributed here.
 The executable identifies as Oxblend 1.3.0, SHA-256
@@ -13,7 +13,7 @@ The executable identifies as Oxblend 1.3.0, SHA-256
 | [trace](trace/1.jsonl) | `trace udim-monster.blend` | 0 |
 | [pack](pack/1.jsonl) | Complete UDIM project directory pack: 23/23 members published | 0 |
 | [killed-pack](killed-pack/1.jsonl) | Another UDIM pack, stopped with SIGKILL after first member publication | 1 (unfinished) |
-| [nested parent](nested/1.jsonl), [child](nested/2.jsonl) | Python writer's `tool.call` passes `STEPTRACE_TRACEPARENT` to a real Oxblend summary | 0 |
+| [nested parent](nested/1.jsonl), [child](nested/2.jsonl) | Python writer's `tool.call` passes `FLATTRACE_TRACEPARENT` to a real Oxblend summary | 0 |
 
 The complete pack's report had `complete:true`, `planning_complete:true`, no
 errors and every planned member written. Publication did not request durability;
@@ -24,13 +24,13 @@ completion is not an fsync guarantee. These records are not a benchmark.
 From the repository root:
 
 ```sh
-python3 -m steptrace check --events examples/oxblend/steptrace-events.json examples/oxblend/summary/1.jsonl examples/oxblend/trace/1.jsonl examples/oxblend/pack/1.jsonl
-python3 -m steptrace check examples/oxblend/nested/*.jsonl
-python3 -m steptrace check --events examples/oxblend/steptrace-events.json examples/oxblend/nested/2.jsonl
-python3 -m steptrace check examples/oxblend/killed-pack/1.jsonl # expected exit 1
+python3 -m flattrace check --events examples/oxblend/flattrace-events.json examples/oxblend/summary/1.jsonl examples/oxblend/trace/1.jsonl examples/oxblend/pack/1.jsonl
+python3 -m flattrace check examples/oxblend/nested/*.jsonl
+python3 -m flattrace check --events examples/oxblend/flattrace-events.json examples/oxblend/nested/2.jsonl
+python3 -m flattrace check examples/oxblend/killed-pack/1.jsonl # expected exit 1
 ```
 
-[steptrace-events.json](steptrace-events.json) is Oxblend 1.3.0's tool-owned event
+[flattrace-events.json](flattrace-events.json) is Oxblend 1.3.0's tool-owned event
 contract, not a synthetic draft. The Python parent has its own event names, so
 check that file without the Oxblend-only contract.
 
@@ -45,11 +45,11 @@ into the partially populated destination.
 
 ## Minimal nested producer
 
-With Oxblend 1.3.0 on PATH and `STEPTRACE_DIR` set, run this from the checkout:
+With Oxblend 1.3.0 on PATH and `FLATTRACE_DIR` set, run this from the checkout:
 
 ```python
 import subprocess
-from steptrace import Writer
+from flattrace import Writer
 
 w = Writer.from_env('python-example', '1', argv=['summary-public-scene'])
 span = w.start('tool.call', {'tool': 'oxblend', 'command': 'summary'}) if w else None

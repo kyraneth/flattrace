@@ -10,11 +10,11 @@ export type Json = null | boolean | number | string | Json[] | { [key: string]: 
 export type Data = { [key: string]: Json };
 export type TraceError = { kind: string; message: string; [key: string]: Json };
 type Options = { argv?: string[]; data?: Data; directory?: string };
-export const CONTEXT_ENV = 'STEPTRACE_TRACEPARENT';
+export const CONTEXT_ENV = 'FLATTRACE_TRACEPARENT';
 let warned = false;
 function warn(error: unknown) {
   if (!warned) {
-    console.error(`steptrace: tracing disabled: ${error}`);
+    console.error(`flattrace: tracing disabled: ${error}`);
     warned = true;
   }
 }
@@ -24,7 +24,7 @@ function ioError(error: unknown): boolean {
 export function context(value: string): [string, string, string] {
   // W3C traceparent widths, not workload limits.
   const m = /^00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})$/.exec(value);
-  if (!m || /^0+$/.test(m[1]) || /^0+$/.test(m[2])) throw new Error('invalid STEPTRACE_TRACEPARENT');
+  if (!m || /^0+$/.test(m[1]) || /^0+$/.test(m[2])) throw new Error('invalid FLATTRACE_TRACEPARENT');
   return [m[1], m[2], m[3]];
 }
 function id(bytes: number): string {
@@ -88,7 +88,7 @@ export class Writer {
   private active = new Map<string, { event: string; parent: string | null; begun: number }>();
 
   static fromEnv(tool: string, version: string, options: Options = {}): Writer | null {
-    const directory = process.env.STEPTRACE_DIR;
+    const directory = process.env.FLATTRACE_DIR;
     if (!directory) return null;
     try {
       mkdirSync(directory, { recursive: true });

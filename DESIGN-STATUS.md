@@ -1,6 +1,6 @@
 # Implementation status
 
-steptrace v1 provides synchronous Python, Rust (Linux) and TypeScript writers,
+flattrace v1 provides synchronous Python, Rust (Linux) and TypeScript writers,
 a checker, a redacting export command and a JSON Schema. Code and docs are MIT.
 
 Oxblend 1.3.0 uses the Rust writer. [Reviewed example exports](examples/oxblend/README.md)

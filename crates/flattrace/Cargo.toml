@@ -1,11 +1,11 @@
 [package]
-name = "steptrace"
+name = "flattrace"
 version = "0.1.0"
 edition = "2021"
 license = "MIT"
-description = "Minimal synchronous steptrace v1 writer (Linux)"
-repository = "https://github.com/kyraneth/steptrace"
-homepage = "https://github.com/kyraneth/steptrace"
+description = "Minimal synchronous flattrace v1 writer (Linux)"
+repository = "https://github.com/kyraneth/flattrace"
+homepage = "https://github.com/kyraneth/flattrace"
 readme = "../../README.md"
 authors = ["Mario Hawat <4396100+kyraneth@users.noreply.github.com>"]
 keywords = ["tracing", "jsonl", "diagnostics"]

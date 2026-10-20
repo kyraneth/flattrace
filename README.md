@@ -1,4 +1,4 @@
-# steptrace
+# flattrace
 
 Small, local JSONL traces for understanding tools after they run. Record nested
 steps, timings, outcomes and explicit benchmark verdicts; join processes through
@@ -8,7 +8,7 @@ Code and documentation are [MIT](LICENSE).
 
 ## Quick start
 
-Use this checkout; registry packages are not published. Set `STEPTRACE_DIR` to a
+Use this checkout; registry packages are not published. Set `FLATTRACE_DIR` to a
 local trace directory to enable environment writers. Unset or empty means off.
 Each process owns a fresh file. Environment sink failures warn once and disable
 recording without stopping product work; explicit-path constructors are strict.
@@ -18,7 +18,7 @@ recording without stopping product work; explicit-path constructors are strict.
 Run from the checkout, or add it to `PYTHONPATH`:
 
 ```python
-from steptrace import Writer
+from flattrace import Writer
 
 w = Writer.from_env("example", "0.1.0", argv=["build"])
 if w is not None:
@@ -34,19 +34,19 @@ Add local dependencies to your application's `Cargo.toml`:
 
 ```toml
 [dependencies]
-steptrace = { path = "../steptrace/crates/steptrace" }
+flattrace = { path = "../flattrace/crates/flattrace" }
 serde_json = "=1.0.150"
 ```
 
 ```rust
 use serde_json::json;
-use steptrace::Writer;
+use flattrace::Writer;
 
 fn main() -> std::io::Result<()> {
     // Supply known hostname, or empty text if unavailable; do not guess.
     if let Some(mut w) = Writer::from_env("example", "0.1.0", vec!["build".into()], "", json!({}))? {
         let span = w.start("build", json!({}), None)?;
-        // For a child: set STEPTRACE_TRACEPARENT from w.traceparent(Some(&span))?.
+        // For a child: set FLATTRACE_TRACEPARENT from w.traceparent(Some(&span))?.
         w.end(&span, "ok", json!({}), None)?;
         w.finish("ok")?;
     }
@@ -72,10 +72,19 @@ if (w) {
 
 ## Check, export and inspect
 
+Install from the checkout (`python3 -m pip install .`) for the console CLI:
+
 ```sh
-python3 -m steptrace check TRACE.jsonl
-python3 -m steptrace check --events TOOL/steptrace-events.json TRACE.jsonl
-python3 -m steptrace export TRACE.jsonl CHILD.jsonl --out reviewed-share
+flattrace check TRACE.jsonl
+flattrace export TRACE.jsonl CHILD.jsonl --out reviewed-share
+```
+
+The equivalent checkout invocation is:
+
+```sh
+python3 -m flattrace check TRACE.jsonl
+python3 -m flattrace check --events TOOL/flattrace-events.json TRACE.jsonl
+python3 -m flattrace export TRACE.jsonl CHILD.jsonl --out reviewed-share
 ```
 
 Export substitutes paths, hosts and users consistently, and masks common
@@ -99,7 +108,7 @@ implied by the example traces.
 
 ```sh
 python3 -m unittest
-cargo test --manifest-path crates/steptrace/Cargo.toml --offline
+cargo test --manifest-path crates/flattrace/Cargo.toml --offline
 node --test typescript/test/*.test.mjs
 ```
 

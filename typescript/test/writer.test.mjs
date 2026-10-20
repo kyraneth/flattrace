@@ -21,7 +21,7 @@ function run(code, env = process.env) {
     `import {Writer} from ${JSON.stringify(moduleUrl)};\n${code}`], { cwd: root, env, encoding: 'utf8' });
 }
 function check(path, ...args) {
-  return spawnSync('python3', ['-m', 'steptrace', 'check', path, ...args], { cwd: root, encoding: 'utf8' });
+  return spawnSync('python3', ['-m', 'flattrace', 'check', path, ...args], { cwd: root, encoding: 'utf8' });
 }
 function rows(path) { return readFileSync(path, 'utf8').trim().split('\n').map(JSON.parse); }
 
@@ -51,7 +51,7 @@ test('cross-process parentage and flags survive the environment entry point', t 
   const w = new Writer(parentPath, 'agent', '1');
   const turn = w.start('agent.turn');
   const result = run(`const w = Writer.fromEnv('oxblend','1'); console.log(w.traceparent()); w.close();`,
-    { ...w.childEnv(turn), STEPTRACE_DIR: join(dir, 'child'), STEPTRACE_TRACEPARENT: w.traceparent(turn).slice(0, -2) + '01' });
+    { ...w.childEnv(turn), FLATTRACE_DIR: join(dir, 'child'), FLATTRACE_TRACEPARENT: w.traceparent(turn).slice(0, -2) + '01' });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout.trim(), /-01$/);
   const name = readdirSync(join(dir, 'child'))[0];
@@ -70,18 +70,18 @@ test('off does no I/O, invalid context fails, unwritable location warns once and
   const dir = fixture(t);
   const blocked = join(dir, 'blocked');
   writeFileSync(blocked, 'not a directory');
-  const env = { ...process.env, STEPTRACE_DIR: '', STEPTRACE_TRACEPARENT: 'bad' };
+  const env = { ...process.env, FLATTRACE_DIR: '', FLATTRACE_TRACEPARENT: 'bad' };
   assert.equal(run(`if (Writer.fromEnv('tool','1') !== null) throw Error('enabled');`, env).status, 0);
-  env.STEPTRACE_DIR = blocked;
-  delete env.STEPTRACE_TRACEPARENT;
+  env.FLATTRACE_DIR = blocked;
+  delete env.FLATTRACE_TRACEPARENT;
   const result = run(`Writer.fromEnv('tool','1'); Writer.fromEnv('tool','1'); console.log('product completed');`, env);
   assert.equal(result.status, 0);
   assert.equal(result.stdout.trim(), 'product completed');
-  assert.equal(result.stderr.match(/steptrace: tracing disabled/g).length, 1);
+  assert.equal(result.stderr.match(/flattrace: tracing disabled/g).length, 1);
   assert.throws(() => context('bad'), /invalid/);
   assert.throws(() => context(`00-${'0'.repeat(32)}-${'1'.repeat(16)}-00`), /invalid/);
   const invalid = run(`new Writer(${JSON.stringify(join(dir, 'bad.jsonl'))}, 'tool','1');`,
-    { ...process.env, STEPTRACE_TRACEPARENT: 'bad' });
+    { ...process.env, FLATTRACE_TRACEPARENT: 'bad' });
   assert.notEqual(invalid.status, 0);
   assert.ok(!readdirSync(dir).includes('bad.jsonl'));
 });
@@ -94,10 +94,10 @@ test('sink failure is nonfatal only for environment writers', t => {
     const w = Writer.fromEnv('tool','1');
     closeSync(w.file); w.file = openSync('/dev/full','w');
     w.point('operation'); w.close(); console.log('product completed');
-  `, { ...process.env, STEPTRACE_DIR: dir, STEPTRACE_TRACEPARENT: undefined });
+  `, { ...process.env, FLATTRACE_DIR: dir, FLATTRACE_TRACEPARENT: undefined });
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout.trim(), 'product completed');
-  assert.equal(result.stderr.match(/steptrace: tracing disabled/g).length, 1);
+  assert.equal(result.stderr.match(/flattrace: tracing disabled/g).length, 1);
 });
 
 test('killed writer stays unfinished and exported without synthetic ends', async t => {
@@ -115,7 +115,7 @@ test('killed writer stays unfinished and exported without synthetic ends', async
   assert.equal(rows(path).length, 2);
   assert.equal(check(path).status, 1);
   const out = join(dir, 'export');
-  const result = spawnSync('python3', ['-m', 'steptrace', 'export', path, '--out', out], { cwd: root });
+  const result = spawnSync('python3', ['-m', 'flattrace', 'export', path, '--out', out], { cwd: root });
   assert.equal(result.status, 1);
   assert.equal(rows(join(out, '1.jsonl')).length, 2);
 });

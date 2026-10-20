@@ -14,7 +14,7 @@ from pathlib import Path
 from .check import validate_event
 from .sanitize import sanitize_argv
 
-CONTEXT_ENV = "STEPTRACE_TRACEPARENT"
+CONTEXT_ENV = "FLATTRACE_TRACEPARENT"
 _warned = False
 
 
@@ -23,7 +23,7 @@ def warn(exc):
     if _warned != os.getpid():
         _warned = os.getpid()
         try:
-            print(f"steptrace: tracing disabled: {exc}", file=sys.stderr)
+            print(f"flattrace: tracing disabled: {exc}", file=sys.stderr)
         except (OSError, ValueError):
             pass  # A closed stderr must not stop product work either.
 
@@ -61,7 +61,7 @@ def context(value):
     # Widths and nonzero IDs are from W3C traceparent, not workload limits.
     match = re.fullmatch(r"00-([0-9a-f]{32})-([0-9a-f]{16})-([0-9a-f]{2})", value)
     if not match or int(match[1], 16) == 0 or int(match[2], 16) == 0:
-        raise ValueError("invalid STEPTRACE_TRACEPARENT")
+        raise ValueError("invalid FLATTRACE_TRACEPARENT")
     return match.groups()
 
 
@@ -73,7 +73,7 @@ def new_id(size):
 class Writer:
     @classmethod
     def from_env(cls, tool, tool_version, *, argv=None, data=None):
-        directory = os.environ.get("STEPTRACE_DIR")
+        directory = os.environ.get("FLATTRACE_DIR")
         if not directory:
             return None
         try:

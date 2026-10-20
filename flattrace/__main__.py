@@ -7,7 +7,7 @@ from .export import export
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Local steptrace check/export")
+    parser = argparse.ArgumentParser(description="Local flattrace check/export")
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser("check")
     check.add_argument("files", nargs="+")

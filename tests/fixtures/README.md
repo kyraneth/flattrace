@@ -1,6 +1,6 @@
 # Exported compatibility and synthetic fixtures
 
-All committed JSONL here passed through `python3 -m steptrace export`.
+All committed JSONL here passed through `python3 -m flattrace export`.
 They are deliberately synthetic, not real product measurements.
 
 - `legacy/1.jsonl`: generated with the earlier v1 Python writer, whose source

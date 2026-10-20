@@ -9,9 +9,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from steptrace import Writer
-from steptrace.check import read_trace
-from steptrace.export import export
+from flattrace import Writer
+from flattrace.check import read_trace
+from flattrace.export import export
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -26,10 +26,10 @@ class TraceTests(unittest.TestCase):
         self.environment = patch.dict(os.environ)
         self.environment.start()
         self.addCleanup(self.environment.stop)
-        os.environ.pop("STEPTRACE_TRACEPARENT", None)
+        os.environ.pop("FLATTRACE_TRACEPARENT", None)
 
     def command(self, *args):
-        return subprocess.run([sys.executable, "-m", "steptrace", *map(str, args)],
+        return subprocess.run([sys.executable, "-m", "flattrace", *map(str, args)],
                               cwd=ROOT, capture_output=True, text=True)
 
     def test_write_read_and_flush(self):
@@ -50,7 +50,7 @@ class TraceTests(unittest.TestCase):
         self.assertEqual(self.command("check", self.path).returncode, 0)
 
     def test_killed_writer_has_no_run_end(self):
-        code = """from steptrace import Writer
+        code = """from flattrace import Writer
 import sys
 w = Writer(sys.argv[1], "oxblend", "dev")
 w.start("read")
@@ -78,7 +78,7 @@ sys.stdin.read()
         parent = Writer(self.path, "agent", "dev")
         turn = parent.start("agent.turn")
         child_path = self.directory / "child.jsonl"
-        code = """from steptrace import Writer
+        code = """from flattrace import Writer
 import sys
 w = Writer(sys.argv[1], "oxblend", "dev")
 w.point("input", {"path":"scene.blend"})
@@ -173,21 +173,21 @@ w.close()
     def test_environment_activation_naming_and_sink_failure(self):
         import io
         from contextlib import redirect_stderr
-        from steptrace import writer as module
-        os.environ.pop("STEPTRACE_DIR", None)
-        os.environ["STEPTRACE_TRACEPARENT"] = "bad"
+        from flattrace import writer as module
+        os.environ.pop("FLATTRACE_DIR", None)
+        os.environ["FLATTRACE_TRACEPARENT"] = "bad"
         self.assertIsNone(Writer.from_env("test", "1"))  # off does not inspect context or disk
-        os.environ.pop("STEPTRACE_TRACEPARENT")
-        os.environ["STEPTRACE_DIR"] = str(self.directory / "traces")
+        os.environ.pop("FLATTRACE_TRACEPARENT")
+        os.environ["FLATTRACE_DIR"] = str(self.directory / "traces")
         for _ in range(2):
             w = Writer.from_env("test", "1", data={"task": "frames", "variant": "base"})
             w.close()
             self.assertRegex(w.path.name, r"^\d{8}T\d{6}\.\d{3}Z-test-[0-9a-f]{32}\.jsonl$")
             self.assertTrue(w.path.name.endswith(w.run + ".jsonl"))
             self.assertFalse(read_trace(w.path)[1])
-        self.assertEqual(len(list(Path(os.environ["STEPTRACE_DIR"]).glob("*.jsonl"))), 2)
+        self.assertEqual(len(list(Path(os.environ["FLATTRACE_DIR"]).glob("*.jsonl"))), 2)
         # Exclusive creation, including a forced collision, never overwrites.
-        occupied = Path(os.environ["STEPTRACE_DIR"]) / "occupied.jsonl"
+        occupied = Path(os.environ["FLATTRACE_DIR"]) / "occupied.jsonl"
         occupied.write_text("original")
         with patch.object(module, "filename", side_effect=[occupied.name, "fresh.jsonl"]):
             w = Writer.from_env("test", "1")
@@ -197,11 +197,11 @@ w.close()
         blocked = self.directory / "not-a-directory"
         blocked.write_text("blocked")
         with patch.object(module, "_warned", False), redirect_stderr(errors):
-            os.environ["STEPTRACE_DIR"] = str(blocked)
+            os.environ["FLATTRACE_DIR"] = str(blocked)
             self.assertIsNone(Writer.from_env("test", "1"))
             self.assertIsNone(Writer.from_env("test", "1"))
-        self.assertEqual(errors.getvalue().count("steptrace: tracing disabled"), 1)
-        os.environ["STEPTRACE_DIR"] = str(self.directory / "later")
+        self.assertEqual(errors.getvalue().count("flattrace: tracing disabled"), 1)
+        os.environ["FLATTRACE_DIR"] = str(self.directory / "later")
         with patch.object(module, "_warned", False), redirect_stderr(io.StringIO()):
             w = Writer.from_env("test", "1")
             w.file.close()
@@ -211,8 +211,8 @@ w.close()
             self.assertIsNone(w.file)
 
     def test_span_pairing_and_per_command_coverage(self):
-        from steptrace.check import read_events, check_events
-        contract_path = self.directory / "steptrace-events.json"
+        from flattrace.check import read_events, check_events
+        contract_path = self.directory / "flattrace-events.json"
         contract_path.write_text(json.dumps({
             "tool": "test", "events": {name: {"kind": "span", "fields": {}}
                                           for name in ("run", "read")},
@@ -263,7 +263,7 @@ w.close()
         complete = sorted((ROOT / "tests/fixtures/synthetic").glob("[1-4].jsonl"))
         self.assertEqual(self.command("check", *complete).returncode, 0)
         summary = ROOT / "examples/oxblend/summary/1.jsonl"
-        self.assertEqual(self.command("check", summary, "--events", ROOT / "examples/oxblend/steptrace-events.json").returncode, 0)
+        self.assertEqual(self.command("check", summary, "--events", ROOT / "examples/oxblend/flattrace-events.json").returncode, 0)
         self.assertEqual(self.command("check", ROOT / "tests/fixtures/synthetic/5.jsonl").returncode, 1)
         self.assertEqual(self.command("check", *sorted((ROOT / "tests/fixtures/synthetic").glob("*.jsonl"))).returncode, 1)
         joined = subprocess.run([sys.executable, "examples/learning.py", *map(str, complete)],
@@ -275,7 +275,7 @@ w.close()
         self.assertEqual(result[0]["score"], 1)
 
     def test_review_regressions(self):
-        from steptrace.check import read_events, check_events
+        from flattrace.check import read_events, check_events
         w = Writer(self.path, "test", "1", argv=["run", "--token", "test-token", "--password=test-pass", "key=test-key", "---token", "test-triple", "--token="])
         self.assertEqual(read_trace(self.path)[0][0]["data"]["pid"], os.getpid())
         for secret in ("test-token", "test-pass", "test-key", "test-triple"):
@@ -325,7 +325,7 @@ w.close()
         def slow_write(writer, *args, **kwargs):
             original(writer, *args, **kwargs)
             clock["value"] += 10  # Synthetic sink latency, not a real wait.
-        with patch("steptrace.writer.time.perf_counter", side_effect=lambda: clock["value"]), patch.object(Writer, "_write", slow_write):
+        with patch("flattrace.writer.time.perf_counter", side_effect=lambda: clock["value"]), patch.object(Writer, "_write", slow_write):
             w = Writer(self.path, "test", "1")
             span = w.start("work")
             clock["value"] += 3  # Synthetic work interval.
@@ -376,7 +376,7 @@ w.close()
     def test_export_keeps_structure_when_private_names_match_field_names(self):
         for host in ("argv", "run", "summary", "1"):
             path = self.directory / (host + ".jsonl")
-            with patch("steptrace.writer.socket.gethostname", return_value=host):
+            with patch("flattrace.writer.socket.gethostname", return_value=host):
                 w = Writer(path, "test", "1", argv=["summary"], data={"command": "summary"})
                 w.point("context", {"env": {"host.name": "remote-env.example"}})
                 w.close()
@@ -404,7 +404,7 @@ w.close()
                 self.assertFalse(issues)
                 if rows[0]["tool"] == "oxblend":
                     self.assertEqual(rows[0]["tool_version"], "1.3.0")
-                    self.assertEqual(self.command("check", path, "--events", base / "steptrace-events.json").returncode, 0)
+                    self.assertEqual(self.command("check", path, "--events", base / "flattrace-events.json").returncode, 0)
         parent, _ = read_trace(base / "nested/1.jsonl")
         child, _ = read_trace(base / "nested/2.jsonl")
         call = next(row for row in parent if row["event"] == "tool.call" and row["state"] == "start")
@@ -420,7 +420,7 @@ w.close()
 
     def test_invalid_context_does_not_create_file(self):
         for value in ("bad", "00-" + "0" * 32 + "-" + "1" * 16 + "-00"):
-            os.environ["STEPTRACE_TRACEPARENT"] = value
+            os.environ["FLATTRACE_TRACEPARENT"] = value
             with self.assertRaises(ValueError):
                 Writer(self.path, "test", "1")
             self.assertFalse(self.path.exists())

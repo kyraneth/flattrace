@@ -3,7 +3,7 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "steptrace"
+name = "flattrace"
 version = "0.1.0"
 description = "Small local JSONL traces with cross-process parentage"
 readme = "README.md"
@@ -13,12 +13,12 @@ keywords = ["tracing", "jsonl", "diagnostics"]
 dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/kyraneth/steptrace"
-Repository = "https://github.com/kyraneth/steptrace"
-Issues = "https://github.com/kyraneth/steptrace/issues"
+Homepage = "https://github.com/kyraneth/flattrace"
+Repository = "https://github.com/kyraneth/flattrace"
+Issues = "https://github.com/kyraneth/flattrace/issues"
 
 [project.scripts]
-steptrace = "steptrace.__main__:main"
+flattrace = "flattrace.__main__:main"
 
 [tool.setuptools]
-packages = ["steptrace"]
+packages = ["flattrace"]

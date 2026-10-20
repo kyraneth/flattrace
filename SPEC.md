@@ -1,8 +1,12 @@
-# steptrace v1
+# flattrace v1
 
 Accurate offline records for performance, bugs, benchmarks, hill-climbing and
 RL—not live monitoring. One UTF-8 JSON object per appended, flushed line;
 each run owns a fresh file. Flush is not crash persistence. No collector/sampling.
+
+The flattrace rename changes names only: the envelope and line format remain
+v1, and files from earlier v1 writers stay valid. Only the environment names
+specified below are supported; there are no previous-name aliases.
 
 | Field | Meaning |
 |---|---|
@@ -39,25 +43,25 @@ none promises clock accuracy at that resolution. Non-UTF-8 paths are lossy text.
 
 ## Activation, ownership and streaming
 
-Nonempty `STEPTRACE_DIR` enables tracing; unset/empty means no trace I/O.
+Nonempty `FLATTRACE_DIR` enables tracing; unset/empty means no trace I/O.
 Applications choose whether to set it. Create the directory if needed. Names `YYYYMMDDTHHMMSS.sssZ-tool-run.jsonl` sort by UTC start to millisecond
 precision (shared Node resolution), then lowercase-slug tool/run. Exclusive
 creation retries a fresh random run ID on collision; never overwrite/append.
 An unavailable directory or later sink I/O failure warns once per process on
 stderr, disables that sink and continues product work. Explicit-path helpers
-are strict. steptrace deletes nothing; cleanup is the operator's choice.
+are strict. flattrace deletes nothing; cleanup is the operator's choice.
 Absence of a trace is not evidence of zero operations.
 
-`STEPTRACE_TRACEPARENT` carries W3C v00 `00-<trace>-<span>-<flags>`
+`FLATTRACE_TRACEPARENT` carries W3C v00 `00-<trace>-<span>-<flags>`
 (32/16/2 lowercase hex digits). A child reuses trace, parents its run to that
-span, and inherits `STEPTRACE_DIR`; flags never filter local events. Invalid
+span, and inherits `FLATTRACE_DIR`; flags never filter local events. Invalid
 context is an error. After fork create a fresh writer with propagated context;
 never reuse an inherited writer (pid mismatch disables it). Python calls must
 be serialized by their owner; Rust requires exclusive `&mut` access; Node owns
 one writer on one event loop, not shared between workers. No shared-file logging.
 
 The file is already a stream (`tail -f`). A separate optional live sender could
-tail `STEPTRACE_DIR`, sending export-cleaned lines per tool and opt-in with an
+tail `FLATTRACE_DIR`, sending export-cleaned lines per tool and opt-in with an
 in-memory placeholder map for its lifetime. It must wait for complete lines;
 an incomplete tail may be still being written or crashed. Not part of core v1.
 Per-run files plus `check` and `jq` filtering keep long sessions inspectable;
@@ -99,14 +103,14 @@ strings, with any existing non-array notes preserved as one array entry.
 Ordinary unknown nulls have no added note. Rust callers use `set_number` before Value conversion:
 serde_json turns non-finite numbers into null before the writer sees them.
 
-Each tool owns `steptrace-events.json`: `tool`, `events` mapping names to
+Each tool owns `flattrace-events.json`: `tool`, `events` mapping names to
 `kind` (`span`/`point`) and `fields` descriptions with units, optional global
 `required` names and optional `commands` mapping command IDs to required arrays.
 `check --events FILE TRACE...` pairs spans, rejects undeclared names/kinds and
 checks requirements **per run**. With `commands`, select via run `data.command`
 or CLI `--command ID`; legacy writers need no new payload field.
 Tool tests own payload meaning and command/branch coverage, not a second schema.
-[Oxblend 1.3.0's event list](examples/oxblend/steptrace-events.json) accompanies
+[Oxblend 1.3.0's event list](examples/oxblend/flattrace-events.json) accompanies
 [real exported examples](examples/oxblend/README.md).
 Analysis can derive disposable paired-span rows (start, duration, outcome,
 unfinished) keyed by `(trace, run, span)`; raw lines remain the only record.
@@ -114,7 +118,7 @@ unfinished) keyed by `(trace, run, span)`; raw lines remain the only record.
 ## Sharing and evolution
 
 Never supply credentials: tools sanitize argv/custom secret flags before capture;
-writers also mask common token/password/key options. `steptrace export` is the
+writers also mask common token/password/key options. `flattrace export` is the
 single redaction route for report-a-bug and per-tool opt-in upload. It substitutes
 paths/hosts/user names consistently and masks credential-looking key/value text,
 Authorization headers and URL credentials. It is **not a secret detector**:

@@ -14,7 +14,7 @@ these joins. It is deliberately separate from measured product examples:
 
 ```sh
 python3 examples/learning.py tests/fixtures/synthetic/[1-4].jsonl
-python3 -m steptrace check tests/fixtures/synthetic/5.jsonl # expected exit 1
+python3 -m flattrace check tests/fixtures/synthetic/5.jsonl # expected exit 1
 ```
 
 A hill-climber must compare matching task/config identities and graders, not
