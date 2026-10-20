@@ -1,0 +1,16 @@
+[package]
+name = "steptrace"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+description = "Minimal synchronous steptrace v1 writer (Linux)"
+repository = "https://github.com/kyraneth/steptrace"
+homepage = "https://github.com/kyraneth/steptrace"
+readme = "../../README.md"
+authors = ["Mario Hawat <4396100+kyraneth@users.noreply.github.com>"]
+keywords = ["tracing", "jsonl", "diagnostics"]
+categories = ["development-tools::debugging"]
+publish = false # Repository preparation only; registry publication is separate.
+
+[dependencies]
+serde_json = "=1.0.150"

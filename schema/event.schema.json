@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "steptrace v1 envelope",
+  "type": "object",
+  "required": ["v", "tool", "tool_version", "run", "trace", "span", "parent", "event", "state", "t", "data"],
+  "additionalProperties": true,
+  "properties": {
+    "v": {"const": 1},
+    "seq": {"type": "integer", "minimum": 0},
+    "tool": {"type": "string"},
+    "tool_version": {"type": "string"},
+    "run": {"type": "string"},
+    "trace": {"type": "string", "pattern": "^(?!0{32}$)[0-9a-f]{32}$"},
+    "span": {"$ref": "#/$defs/span"},
+    "parent": {"anyOf": [{"type": "null"}, {"$ref": "#/$defs/span"}]},
+    "event": {"type": "string"},
+    "state": {"enum": ["start", "end", "point"]},
+    "t": {"type": "string", "format": "date-time", "pattern": "^\\d{4}-\\d\\d-\\d\\dT\\d\\d:\\d\\d:\\d\\d(?:\\.\\d+)?(?:Z|\\+00:00)$"},
+    "took_ms": {"type": ["number", "null"], "minimum": 0},
+    "outcome": {"type": "string"},
+    "data": {"type": "object"},
+    "error": {
+      "type": "object", "required": ["kind", "message"], "additionalProperties": true,
+      "properties": {"kind": {"type": "string"}, "message": {"type": "string"}}
+    }
+  },
+  "allOf": [{
+    "if": {"properties": {"state": {"const": "end"}}},
+    "then": {"required": ["took_ms", "outcome"]},
+    "else": {"not": {"anyOf": [{"required": ["took_ms"]}, {"required": ["outcome"]}]}}
+  }],
+  "$defs": {"span": {"type": "string", "pattern": "^(?!0{16}$)[0-9a-f]{16}$"}}
+}
