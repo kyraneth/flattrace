@@ -1,26 +1,50 @@
 {
   "name": "flattrace",
   "version": "0.1.0",
-  "private": true,
   "description": "Small local JSONL traces with cross-process parentage",
+  "author": "Mario Hawat <4396100+kyraneth@users.noreply.github.com>",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/kyraneth/flattrace.git",
     "directory": "typescript"
   },
   "homepage": "https://github.com/kyraneth/flattrace",
-  "bugs": "https://github.com/kyraneth/flattrace/issues",
-  "author": "Mario Hawat <4396100+kyraneth@users.noreply.github.com>",
-  "keywords": ["tracing", "jsonl", "diagnostics"],
-  "files": ["writer.ts", "README.md", "LICENSE"],
+  "bugs": {
+    "url": "https://github.com/kyraneth/flattrace/issues"
+  },
+  "keywords": [
+    "tracing",
+    "jsonl",
+    "diagnostics",
+    "offline",
+    "profiling"
+  ],
   "type": "module",
   "license": "MIT",
   "engines": {
     "node": ">=22.18.0"
   },
-  "exports": "./writer.ts",
-  "types": "./writer.ts",
+  "main": "./dist/writer.js",
+  "types": "./dist/writer.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/writer.d.ts",
+      "import": "./dist/writer.js"
+    }
+  },
+  "files": [
+    "dist/writer.js",
+    "dist/writer.d.ts",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
+    "build": "tsc -p tsconfig.json && node build-docs.mjs",
+    "prepack": "npm run build",
     "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "typescript": "^7.0.2"
   }
 }

@@ -7,9 +7,16 @@ name = "flattrace"
 version = "0.1.0"
 description = "Small local JSONL traces with cross-process parentage"
 readme = "README.md"
-license = { file = "LICENSE" }
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [{ name = "Mario Hawat", email = "4396100+kyraneth@users.noreply.github.com" }]
-keywords = ["tracing", "jsonl", "diagnostics"]
+keywords = ["tracing", "jsonl", "diagnostics", "offline", "profiling"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+  "Topic :: Software Development :: Debuggers",
+]
 dependencies = []
 
 [project.urls]
@@ -22,3 +29,4 @@ flattrace = "flattrace.__main__:main"
 
 [tool.setuptools]
 packages = ["flattrace"]
+include-package-data = false

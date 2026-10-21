@@ -1,18 +1,18 @@
-# Exported compatibility and synthetic fixtures
+# Compatibility and parity fixtures
 
-All committed JSONL here passed through `python3 -m flattrace export`.
-They are deliberately synthetic, not real product measurements.
+`legacy/1.jsonl` is a frozen synthetic v1 writer output. Its SHA-256 is
+`8dfaa5fc537ef58cf0562f61dc170fe6963b5cdf48fbdfd64d5d9dfc0e93824d`.
+It deliberately lacks seq, pid, command, environment and learning fields.
+Keep it byte-identical: check, event coverage and export must accept it without
+adding fields, including explicit CLI command selection.
 
-- `legacy/1.jsonl`: generated with the earlier v1 Python writer, whose source
-  SHA-256 was `b85e71147e75d277f842f0764c826e70e2e1d9c87660ddcf39a3fb8c1c396b22`.
-  Only clocks, ID entropy and hostname were mocked. It lacks seq, pid, command,
-  environment and learning fields; tests require continued v1 acceptance.
-- `synthetic/1.jsonl`: agent parent; `2.jsonl`: nested summary;
-  `3.jsonl`: benchmark target; `4.jsonl`: separate explicit verdict.
-  `5.jsonl` is an unfinished pack fixture; `5.tail.txt` records an omitted
-  synthetic torn final line. Checking the full bundle intentionally exits 1.
+`sanitize-argv.json` supplies the same synthetic secret-flag cases to Python,
+Rust and TypeScript tests. Never add real credentials, private paths or hosts.
 
-Synthetic task/config hashes name the bytes `synthetic-scene-fps-task` and
-`synthetic-candidate-config` respectively, using SHA-256. These invented
-measurements exercise joins and redaction only. Actual product examples live
-under [examples/oxblend](../../examples/oxblend/README.md).
+The public fixture is a reviewed redacted export of that frozen synthetic output.
+
+`synthetic/1.jsonl` is the agent parent; `2.jsonl` its nested summary;
+`3.jsonl` a benchmark target; `4.jsonl` its separate verdict. `5.jsonl` is
+unfinished and `5.tail.txt` records its omitted torn tail. These invented
+timings demonstrate joins, not performance; measured examples are under
+[examples/oxblend](../../examples/oxblend/README.md).

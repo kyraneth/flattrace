@@ -115,7 +115,7 @@ usage; they do not change the envelope or checker behavior.
   `{sha256, bytes, path}` references for bulky artifacts. There is no automatic
   copying, blob store or attachment machinery.
 - Tools SHOULD record known machine/build/agent/harness/model facts in run-start
-  `data.env` using the [small vocabulary](docs/environment.md).
+  `data.env` using the [small vocabulary](docs/reference.md#environment-and-build-provenance).
   Reported-but-unknown facts MUST be null; omitted optional keys mean not reported.
   Tools MUST NOT scrape the whole environment. Model/effort changes SHOULD be
   recorded on turn/model spans rather than only the initial header.
@@ -203,7 +203,6 @@ there is no rotation, retention limit or index machinery. Cleanup is the
 operator's choice. Export is not a secret detector and core supplies no uploader
 or server.
 
-[Oxblend's tool-owned event list](examples/oxblend/flattrace-events.json)
-illustrates command coverage; products own their instrumentation and tests.
+[Oxblend's public-doc draft](examples/oxblend/flattrace-events.json) illustrates a tool-owned event list; it is not an integration guarantee.
 Analysis can derive disposable paired-span rows (start, duration, outcome,
 unfinished) keyed by `(trace, run, span)`; raw lines remain the only record.

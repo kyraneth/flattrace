@@ -18,7 +18,7 @@ A retry gets a new span and `data.retry_of` (prior span ID); optional
 `data.links: [{relation, trace, span}]` expresses async completion/fan-in/other
 causality. These are data conventions, never envelope links or replay authority.
 
-The [environment vocabulary](environment.md)
+The [environment vocabulary](reference.md#environment-and-build-provenance)
 describes known-facts `env`; labels alone are not immutable input identities.
 
 ## Grades and recording termination
@@ -59,5 +59,5 @@ the bytes `synthetic-scene-fps-task`; `config_hash` hashes
 `synthetic-candidate-config`, both SHA-256. Seed/episode/attempt are explicitly
 synthetic. Actual benchmark tools document their own immutable hash inputs.
 See [examples](../examples/README.md) for commands and
-[offline analysis](../README.md#analysing-traces) for the streaming reader's
+[offline analysis](../README.md#check-and-analyse) for the streaming reader's
 measurement limits.

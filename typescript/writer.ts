@@ -267,7 +267,7 @@ export class Writer {
     this.entry(span);
     return `00-${this.trace}-${span}-${this.flags}`;
   }
-  childEnv(span = this.root): NodeJS.ProcessEnv {
+  childEnv(span = this.root): Record<string, string | undefined> {
     return { ...process.env, [CONTEXT_ENV]: this.traceparent(span) };
   }
   close(outcome = 'ok'): void {
