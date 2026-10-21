@@ -1,5 +1,11 @@
 # flattrace
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo/flattrace-wordmark-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/logo/flattrace-wordmark-light.svg">
+  <img alt="flattrace" src="assets/logo/flattrace-wordmark-light.svg" width="444">
+</picture>
+
 **Flat file, deep trace.** flattrace records what a tool did as small, local JSONL events: nested steps, outcomes, errors and measured durations, even across child processes. Python, Rust and TypeScript writers share one v1 envelope. Check traces, find slow steps and redact a bundle for a bug report—all offline, without a collector, server or account. Code, docs and examples are [MIT licensed](LICENSE).
 
 ## Install

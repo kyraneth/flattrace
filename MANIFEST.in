@@ -8,4 +8,5 @@ prune skills
 prune typescript
 prune crates
 prune schema
+prune assets
 global-exclude __pycache__ *.py[cod]
