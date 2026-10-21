@@ -1,6 +1,6 @@
 [build-system]
-requires = ["setuptools"]
-build-backend = "setuptools.build_meta"
+requires = ["uv_build==0.9.27"]
+build-backend = "uv_build"
 
 [project]
 name = "flattrace"
@@ -27,6 +27,6 @@ Issues = "https://github.com/kyraneth/flattrace/issues"
 [project.scripts]
 flattrace = "flattrace.__main__:main"
 
-[tool.setuptools]
-packages = ["flattrace"]
-include-package-data = false
+[tool.uv.build-backend]
+module-root = ""
+module-name = "flattrace"

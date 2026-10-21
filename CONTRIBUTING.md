@@ -38,11 +38,16 @@ npm --prefix typescript pack --dry-run
 ```
 
 The npm prepack step builds JS and declarations and stages the shared README
-and MIT license. Python uses setuptools with an explicit package/file allowlist.
+and MIT license. Python uses the exactly pinned uv build backend, including only the Python
+module, project metadata, README and license; archive ownership and timestamps
+are normalized by the backend.
 Cargo stages the shared README automatically; the crate carries a copy of the MIT license.
 Run the README examples against the resulting artifacts outside the checkout.
 Review archive members and metadata for unrelated files and private data.
 No registry publication is implied by a build or dry run.
+
+For the manually dispatched, hash-approved trusted-publishing workflow, see
+[Releases](docs/releases.md).
 
 ## Changes
 

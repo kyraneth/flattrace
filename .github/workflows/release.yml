@@ -1,0 +1,248 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: Release tag or full commit SHA (not a branch)
+        required: true
+        type: string
+      target:
+        description: Build only, or publish previously reviewed exact bytes
+        required: true
+        default: build
+        type: choice
+        options:
+          - build
+          - pypi
+          - npm
+      expected_wheel_sha256:
+        description: Required for pypi; lowercase SHA-256 from the reviewed build
+        type: string
+      expected_sdist_sha256:
+        description: Required for pypi; lowercase SHA-256 from the reviewed build
+        type: string
+      expected_tgz_sha256:
+        description: Required for npm; lowercase SHA-256 from the reviewed build
+        type: string
+
+permissions: {}
+
+defaults:
+  run:
+    shell: bash
+
+env:
+  PYTHONDONTWRITEBYTECODE: '1'
+  TZ: UTC
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+    steps:
+      - name: Validate release selection and approval hashes
+        id: selection
+        env:
+          RELEASE_REF: ${{ inputs.ref }}
+          RELEASE_TARGET: ${{ inputs.target }}
+          EXPECTED_WHEEL: ${{ inputs.expected_wheel_sha256 }}
+          EXPECTED_SDIST: ${{ inputs.expected_sdist_sha256 }}
+          EXPECTED_TGZ: ${{ inputs.expected_tgz_sha256 }}
+        run: |
+          umask 002
+          if [[ "$RELEASE_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            printf 'ref=%s\n' "$RELEASE_REF" >> "$GITHUB_OUTPUT"
+          else
+            git check-ref-format "refs/tags/$RELEASE_REF"
+            printf 'ref=refs/tags/%s\n' "$RELEASE_REF" >> "$GITHUB_OUTPUT"
+          fi
+          case "$RELEASE_TARGET" in
+            build) ;;
+            pypi)
+              [[ "$EXPECTED_WHEEL" =~ ^[0-9a-f]{64}$ ]]
+              [[ "$EXPECTED_SDIST" =~ ^[0-9a-f]{64}$ ]]
+              ;;
+            npm) [[ "$EXPECTED_TGZ" =~ ^[0-9a-f]{64}$ ]] ;;
+            *) exit 1 ;;
+          esac
+
+      - name: Check out selected tag or commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ steps.selection.outputs.ref }}
+          persist-credentials: false
+
+      - name: Record exact source and commit timestamp
+        env:
+          RELEASE_TARGET: ${{ inputs.target }}
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: |
+          umask 002
+          # npm provenance reports the workflow commit as the source commit.
+          if [[ "$RELEASE_TARGET" == npm ]]; then
+            [[ "$(git rev-parse HEAD)" == "$WORKFLOW_SHA" ]]
+          fi
+          printf 'SOURCE_DATE_EPOCH=%s\n' "$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
+          printf 'Source commit: %s\n' "$(git rev-parse HEAD)"
+          git rev-parse HEAD > "$RUNNER_TEMP/source-commit.txt"
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13.11'
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.9.27'
+          enable-cache: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.18.0'
+          package-manager-cache: false
+
+      - name: Verify bundled npm and install pinned Rust
+        run: |
+          umask 002
+          # Node v24.18.0 bundles npm 11.16.0; no ad-hoc package install.
+          [[ "$(npm --version)" == '11.16.0' ]]
+          rustup toolchain install 1.94.1 --profile minimal
+
+      - name: Run all test suites
+        run: |
+          umask 002
+          python -m unittest -v
+          python -m unittest discover -s bench -p 'test_*.py' -v
+          cargo +1.94.1 test --manifest-path crates/flattrace/Cargo.toml --locked
+          cargo +1.94.1 test --manifest-path bench/rust/Cargo.toml --locked
+          npm --prefix typescript ci --ignore-scripts
+          npm --prefix typescript test
+
+      - name: Build Python and npm distributions
+        run: |
+          umask 002
+          # uv_build is exactly pinned in pyproject.toml. Its native archive
+          # writer normalizes ownership and timestamps without post-processing.
+          python - <<'PY'
+          import tomllib
+          from pathlib import Path
+          config = tomllib.loads(Path('pyproject.toml').read_text())
+          assert config['build-system'] == {
+              'requires': ['uv_build==0.9.27'], 'build-backend': 'uv_build'
+          }, 'Select a release commit with the reproducible build configuration'
+          PY
+          uv build --python 3.13.11 --no-sources --out-dir dist/python
+          npm --prefix typescript run build
+          mkdir -p dist/npm
+          (cd typescript && npm pack --ignore-scripts --pack-destination ../dist/npm)
+          cp "$RUNNER_TEMP/source-commit.txt" dist/source-commit.txt
+          (cd dist && sha256sum python/*.whl python/*.tar.gz npm/*.tgz | tee SHA256SUMS)
+          {
+            echo '## Release build'
+            echo
+            printf 'Source commit: `%s`\n\n' "$(git rev-parse HEAD)"
+            echo '```text'
+            cat dist/SHA256SUMS
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload immutable build artifacts
+        id: upload
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-distributions
+          path: dist/
+          if-no-files-found: error
+
+  publish-pypi:
+    needs: build
+    if: inputs.target == 'pypi'
+    runs-on: ubuntu-24.04
+    environment: pypi
+    permissions:
+      id-token: write
+    steps:
+      - name: Download this build's immutable artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          path: dist
+          merge-multiple: true
+
+      - name: Verify approved Python bytes before OIDC or upload
+        env:
+          EXPECTED_WHEEL: ${{ inputs.expected_wheel_sha256 }}
+          EXPECTED_SDIST: ${{ inputs.expected_sdist_sha256 }}
+        run: |
+          umask 002
+          [[ "$EXPECTED_WHEEL" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$EXPECTED_SDIST" =~ ^[0-9a-f]{64}$ ]]
+          wheels=(dist/python/*.whl)
+          sdists=(dist/python/*.tar.gz)
+          [[ ${#wheels[@]} == 1 && -f "${wheels[0]}" ]]
+          [[ ${#sdists[@]} == 1 && -f "${sdists[0]}" ]]
+          printf '%s  %s\n' "$EXPECTED_WHEEL" "${wheels[0]}" | sha256sum --check --strict -
+          printf '%s  %s\n' "$EXPECTED_SDIST" "${sdists[0]}" | sha256sum --check --strict -
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          version: '0.9.27'
+          enable-cache: false
+
+      - name: Publish exact approved Python files with PyPI trusted publishing
+        run: |
+          umask 002
+          uv publish --trusted-publishing always dist/python/*.whl dist/python/*.tar.gz
+
+  publish-npm:
+    needs: build
+    if: inputs.target == 'npm'
+    runs-on: ubuntu-24.04
+    environment: npm
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Download this build's immutable artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          path: dist
+          merge-multiple: true
+
+      - name: Verify approved npm bytes before OIDC or upload
+        env:
+          EXPECTED_TGZ: ${{ inputs.expected_tgz_sha256 }}
+        run: |
+          umask 002
+          [[ "$EXPECTED_TGZ" =~ ^[0-9a-f]{64}$ ]]
+          packages=(dist/npm/*.tgz)
+          [[ ${#packages[@]} == 1 && -f "${packages[0]}" ]]
+          printf '%s  %s\n' "$EXPECTED_TGZ" "${packages[0]}" | sha256sum --check --strict -
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          # npm trusted publishing requires Node >=22.14.0 and npm >=11.5.1:
+          # https://docs.npmjs.com/trusted-publishers/
+          node-version: '24.18.0'
+          package-manager-cache: false
+
+      - name: Verify pinned bundled npm
+        run: |
+          umask 002
+          [[ "$(npm --version)" == '11.16.0' ]]
+
+      - name: Publish exact approved tarball with npm trusted publishing
+        env:
+          NPM_CONFIG_IGNORE_SCRIPTS: 'true'
+        run: |
+          umask 002
+          npm publish dist/npm/*.tgz --provenance --access public
