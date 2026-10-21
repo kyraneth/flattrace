@@ -4,10 +4,12 @@ import sys
 
 from .check import read_trace, read_events, check_events
 from .export import export
+from .stats import analyse, format_text
+import json
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Local flattrace check/export")
+    parser = argparse.ArgumentParser(description="Local flattrace check/export/stats")
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser("check")
     check.add_argument("files", nargs="+")
@@ -18,8 +20,15 @@ def main():
     copy.add_argument("--out", required=True, help="new output directory")
     for kind in ("path", "host", "user"):
         copy.add_argument("--" + kind, action="append", default=[])
+    stats = commands.add_parser("stats", help="stream trace corpus statistics")
+    stats.add_argument("files", nargs="+", help="trace files or recursive directories")
+    stats.add_argument("--json", action="store_true", help="machine-readable report")
     args = parser.parse_args()
     try:
+        if args.command == "stats":
+            report = analyse(args.files)
+            print(json.dumps(report, ensure_ascii=False, allow_nan=False) if args.json else format_text(report))
+            return int(bool(report["invalid_files"]) or any(run["issues"] for group in ("runs", "duplicates") for run in report[group]))
         if args.command == "export":
             issues = export(args.files, args.out, paths=args.path, hosts=args.host, users=args.user)
             print("\n".join(issues) if issues else f"exported to {args.out}")

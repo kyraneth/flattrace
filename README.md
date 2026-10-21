@@ -9,8 +9,9 @@ Code and documentation are [MIT](LICENSE).
 ## Does "flat" mean no depth?
 
 No. **Flat file, deep trace.** *Flat* describes the file: every line is one
-small, self-contained JSON event, so a writer just appends, you can `grep` or
-stream it, and a crash costs at most the last line. The trace itself is a tree
+small, self-contained JSON event, so a writer just appends and you can `grep`
+or stream it. Flush is not crash persistence: a crash may lose more than the
+last line. The trace itself is a tree
 as deep as you like, even across processes: each step carries its own `span`
 and its `parent`, and a child process joins the caller's trace through
 `FLATTRACE_TRACEPARENT`.
@@ -77,6 +78,8 @@ flattrace = { path = "../flattrace/crates/flattrace" }
 serde_json = "=1.0.150"
 ```
 
+The writer also depends on regex for credential masking.
+
 ```rust
 use serde_json::json;
 use flattrace::Writer;
@@ -109,6 +112,101 @@ if (w) {
 }
 ```
 
+All writers flush each line, require explicit ends, and invent nothing on drop,
+exit or kill. Asynchronous children can outlive their launching span; end all
+local spans before closing the run. Writers are synchronous, not shared-file
+multi-process loggers. No writer deletes files or uploads anything.
+Calls must be serialized (Python owner, Rust `&mut`, Node event-loop owner).
+A forked child must start a fresh writer; pid checks prevent inherited writes.
+Points reuse both their enclosing span ID and that span's parent (not a new
+span parented to the enclosing span). Late points on ended spans move to the
+active run with its parent and a note; points after run close are ignored.
+Only `close`/`finish` ends the root, and closing with active local spans is an
+API error. Direct `end(root)` is refused: explicit-path mode reports an API
+error; environment mode warns and returns without raising (Rust `Ok(())`),
+leaving the run active.
+
+Tools supply **sanitized** argv explicitly; absent argv is empty, never an
+implicit process-argument scrape. Customize for tool-specific secret flags.
+Writers additionally mask common token/password/secret/API-key/access-key/key
+options. Unserialisable payload values degrade to safe strings/placeholders plus
+notes and writing continues; payload normalization is not full event validation.
+The checker retains full validation, not a per-line writer validation pass.
+Structural API mistakes (non-string tool/version/event names, reserved `run`,
+inactive spans/parents, malformed error objects and invalid outcome types) still
+report errors, apart from the explicit
+environment-mode `end(root)` exception above. They may leave unfinished evidence;
+never invent successful ends to hide it. These helpers are not a secret detector;
+credentials should never reach trace calls or error prose. Use `sanitize_argv` /
+`sanitizeArgv` when useful. Omit optional errors using the native absence value:
+Python `None`, Rust `None`, TypeScript `undefined`; JSON null is not an error object.
+
+## Offline analysis
+
+[Learning conventions](docs/learning.md) define optional comparability identities,
+grades and hill-climbing/RL consumption, all in `data`. The
+[learning join](examples/learning.py) demonstrates these conventions without
+changing the format or certifying benchmark validity.
+
+A reader may derive a disposable paired-span row keyed by `(trace, run, span)`:
+start time, measured duration, outcome, unfinished flag and source pointers.
+That is an analysis view, not a second recording format; no invented end or
+exclusive CPU time. Async/overlapping residence times cannot safely be summed
+or blindly subtracted. The streaming `stats` reader below derives these views without retaining raw
+rows; raw JSONL remains the source of truth.
+
+## Analysing traces
+
+```sh
+python3 -m flattrace stats examples/
+python3 -m flattrace stats trace.jsonl archive.jsonl.gz --json
+```
+
+Files and recursively scanned directories may be mixed. Reports include run
+counts/status, reported run-level distribution (legacy missing level is
+`unknown`), exact nearest-rank p50/p95/max/total durations by name for each run
+and the corpus, every run ordered slowest-first, and its dominant span names.
+Unknown-duration runs sort last. There is no arbitrary top-N cutoff. Completed,
+matched span durations are included even in unfinished runs, with issues and
+unfinished counts visible. Empty/invalid files are reported separately, never
+invented runs. Exit 0 means no input issues, 1 means invalid/unfinished evidence,
+and 2 means invocation/I/O failure. Check and export are unchanged.
+
+**Inclusive totals are sums of observations, not elapsed corpus time:** nested
+or overlapping span names must not be added together. `self_ms` is a conservative
+local unattributed-residence estimate: parent `took_ms` minus sequential, fully
+contained direct local children. It includes instrumentation/waits, not just CPU
+work. It is unknown for overlapping children, children that outlive a parent
+(including affected ancestors), unknown child durations, or invalid/incomplete
+run evidence. Cross-process children are not subtracted: v1 has no common
+monotonic timeline for an exact interval union. Wall timestamps are never used
+to derive durations. The report gives sample counts separately for known total
+and self times; unknown is not zero.
+
+Errors count records carrying `error`, `outcome=error`, or explicit
+`data.severity=error`, once per record. Warnings count only explicit
+`data.severity=warn`/`warning`; v1 has no standardized warning field, so empty
+counts do **not** establish absence of warnings. Names/prose are never guessed.
+A positive integer `data.count` expands an error/warning record's occurrences;
+span-duration sample counts still count spans, not coalesced occurrences.
+
+Inputs are deduplicated by `(trace, run)`, first copy encountered wins (directory
+traversal is lexical). Duplicates are listed in JSON and still fully validated (bad duplicate evidence
+also produces exit 1); only their duration/error/warning samples are excluded.
+Do not mix divergent copies of the same run or use this view as an
+integrity/comparability certificate.
+The reader processes one line at a time. Active span frames and run/name summaries
+remain in memory; completed samples and seen-span IDs go to a temporary SQLite
+file, removed on exit. Exact quantiles use disk-backed sorting, not a retained
+list of events or approximate histogram. Diagnostics are grouped by fixed issue
+category with occurrence counts and the first source-line detail (`issues` plus
+`issue_counts`), not retained once per bad line; raw inputs preserve every detail.
+Temporary disk must accommodate the selected corpus's duration samples. Output includes source paths/IDs: it is local
+analysis, **not** a redacted sharing export.
+
+See [GAPS.md](GAPS.md) for remaining format/SPEC proposals.
+
+
 ## Check, export and inspect
 
 Install from the checkout (`python3 -m pip install .`) for the console CLI:
@@ -137,11 +235,16 @@ interior corruption; an omitted final line gets a numbered `.tail.txt` note.
 See [real Oxblend 1.3.0 exports](examples/oxblend/README.md) for summary, dependency
 trace, complete UDIM pack, interrupted pack and Python-to-Rust nesting.
 [The format specification](SPEC.md), [JSON Schema](schema/event.schema.json),
-[environment vocabulary](docs/environment.md) and [learning join](examples/README.md)
+[environment vocabulary](docs/environment.md), [learning conventions](docs/learning.md)
+and [learning join](examples/README.md)
 explain the contracts and their limits. Timings are residence time, not exclusive
 CPU time; do not sum overlapping spans. IDs establish parentage, not timestamps.
-Readers currently load the selected files in memory. No performance claim is
-implied by the example traces.
+Check/export load the selected files in memory; stats streams them. Counters
+expose removed interior lines and reordering, not durability or every lost suffix.
+No performance claim is implied by the example traces.
+
+The [synthetic overhead harness](bench/README.md) measures paired writer workloads;
+machine-specific retained reports are not bundled.
 
 ## Tests
 

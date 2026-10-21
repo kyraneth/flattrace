@@ -238,7 +238,44 @@ test('start clock is captured after the start write', t => {
   assert.equal(result[0].data.argv.at(-1), '--token=<redacted>');
 });
 
-test('invalid JSON payloads and inactive spans are rejected', t => {
+test('normalization validates a snapshot without mutating input or losing JSON keys', t => {
+  const w = new Writer(join(fixture(t), 'normalize.jsonl'), 'synthetic', '1');
+  const payload = JSON.parse('{"__proto__": {"value": null}, "nested": [1, {"value": null}], "notes": "caller"}');
+  payload.__proto__.value = Infinity;
+  payload.nested[1].value = NaN;
+  w.point('sample', payload, w.root, { kind: 'synthetic', message: 'synthetic', value: Infinity });
+  const row = rows(w.path).at(-1);
+  assert.equal(row.data.__proto__.value, null);
+  assert.equal(row.data.nested[1].value, null);
+  assert.equal(row.error.value, null);
+  assert.deepEqual(row.data.notes, ['caller', 'non-finite number replaced with null']);
+  assert.equal(payload.__proto__.value, Infinity);
+  assert.ok(Number.isNaN(payload.nested[1].value));
+  assert.equal(payload.notes, 'caller');
+  const sparse = [1, , 3];
+  w.point('sparse', { sparse });
+  assert.deepEqual(rows(w.path).at(-1).data.sparse, [1, null, 3]);
+  let reads = 0;
+  w.point('snapshot', { get value() { return ++reads === 1 ? 7 : undefined; } });
+  assert.equal(reads, 1);
+  assert.equal(rows(w.path).at(-1).data.value, 7);
+  const custom = { count: 1 };
+  Object.defineProperty(custom, 'toJSON', { value: () => undefined });
+  const customArray = [1, 2];
+  Object.defineProperty(customArray, 'toJSON', { value: () => 'unexpected' });
+  w.point('plain-snapshot', { custom, customArray });
+  assert.deepEqual(rows(w.path).at(-1).data, { custom: { count: 1 }, customArray: [1, 2] });
+  for (const unsupported of [new Date(0), { nested: [undefined] }, { nested: { fn() {} } }]) {
+    w.point('degraded', unsupported);
+    assert.ok(rows(w.path).at(-1).data.notes.length);
+  }
+  w.point('null-prototype', Object.create(null));
+  assert.deepEqual(rows(w.path).at(-1).data, {});
+  w.close();
+  assert.equal(check(w.path).status, 0);
+});
+
+test('invalid JSON values degrade while structural API errors remain explicit', t => {
   const w = new Writer(join(fixture(t), 'strict.jsonl'), 'tool', '1');
   w.point('numbers', { nan: NaN, inf: Infinity, unknown: null });
   const data = rows(w.path)[1].data;
@@ -247,7 +284,9 @@ test('invalid JSON payloads and inactive spans are rejected', t => {
   assert.ok(data.notes.includes('non-finite number replaced with null'));
   w.point('unknown', { unknown: null });
   assert.equal(rows(w.path)[2].data.notes, undefined);
-  assert.throws(() => w.point('bad', { score: undefined }), /JSON values/);
+  w.point('degraded', { score: undefined });
+  assert.equal(rows(w.path).at(-1).data.score, 'undefined');
+  assert.ok(rows(w.path).at(-1).data.notes.length);
   assert.throws(() => w.point('run'), /reserved/);
   assert.throws(() => w.start('bad', {}, 'missing'), /inactive/);
   w.close();

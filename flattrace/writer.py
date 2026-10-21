@@ -11,7 +11,6 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .check import validate_event
 from .sanitize import sanitize_argv
 
 CONTEXT_ENV = "FLATTRACE_TRACEPARENT"
@@ -19,13 +18,14 @@ LEVEL_ENV = "FLATTRACE_LEVEL"
 _warned = False
 
 
-def warn(exc):
+def warn(exc, *, disabled=True):
     global _warned
     if _warned != os.getpid():
         _warned = os.getpid()
         try:
-            print(f"flattrace: tracing disabled: {exc}", file=sys.stderr)
-        except (OSError, ValueError):
+            prefix = "tracing disabled: " if disabled else ""
+            print(f"flattrace: {prefix}{exc}", file=sys.stderr)
+        except (OSError, ValueError, UnicodeError):
             pass  # A closed stderr must not stop product work either.
 
 
@@ -44,18 +44,54 @@ def add_note(data, note):
     return {**data, "notes": [*existing, note]}
 
 
-def numbers(value):
-    """Return JSON-safe numbers and whether a non-finite value was replaced."""
-    if isinstance(value, float) and not math.isfinite(value):
-        return None, True
-    if isinstance(value, (dict, list, tuple)):
-        items = value.items() if isinstance(value, dict) else enumerate(value)
-        result, changed = {}, False
-        for key, item in items:
-            result[key], replaced = numbers(item)
-            changed |= replaced
-        return (result if isinstance(value, dict) else list(result.values())), changed
-    return value, False
+def representation(value):
+    try:
+        return repr(value)
+    except Exception:
+        return "<unserializable value>"
+
+
+def normalize(value, notes, active=None):
+    """Copy JSON values once; replace only the parts that cannot be recorded."""
+    if value is None or isinstance(value, (str, bool, int)):
+        return value
+    if isinstance(value, float):
+        if math.isfinite(value):
+            return value
+        notes.add("non-finite number replaced with null")
+        return None
+    if not isinstance(value, (dict, list, tuple)):
+        notes.add("unserializable value replaced with text")
+        return representation(value)
+    if active is None:
+        active = set()
+    identity = id(value)
+    if identity in active:
+        notes.add("circular reference replaced with text")
+        return "<circular reference>"
+    active.add(identity)
+    try:
+        if isinstance(value, dict):
+            if all(isinstance(key, str) for key in value):
+                return {key: normalize(item, notes, active) for key, item in value.items()}
+            # Pairs preserve keys without stringification collisions (1 versus "1").
+            notes.add("non-string object keys represented as pairs")
+            return [[normalize(key, notes, active), normalize(item, notes, active)]
+                    for key, item in value.items()]
+        return [normalize(item, notes, active) for item in value]
+    except Exception:
+        notes.add("unserializable value replaced with text")
+        return representation(value)
+    finally:
+        active.remove(identity)
+
+
+def payload(value, notes):
+    value = normalize(value, notes)
+    if not isinstance(value, dict):
+        notes.add("non-object data wrapped in value")
+        value = {"value": value}
+    return value
 
 
 def context(value):
@@ -71,8 +107,11 @@ def level_from_env():
     raw = os.environ.get(LEVEL_ENV, "").strip()
     if not raw:
         return 1, None
-    if raw.isdigit():
-        return int(raw), None
+    if raw.isascii() and raw.isdigit():
+        try:
+            return int(raw), None
+        except ValueError:
+            pass  # Python's configured integer-string conversion limit.
     return 1, f"invalid {LEVEL_ENV} {raw!r} treated as 1"
 
 
@@ -88,7 +127,11 @@ class Writer:
         level, note = level_from_env()
         if not directory or level == 0:
             return None
-        data = {**({} if data is None else data), "level": level}
+        notes = set()
+        data = payload({} if data is None else data, notes)
+        for message in sorted(notes):
+            data = add_note(data, message)
+        data = {**data, "level": level}
         if note is not None:
             data = add_note(data, note)
         try:
@@ -101,6 +144,8 @@ class Writer:
             return None
 
     def __init__(self, path, tool, tool_version, *, argv=None, data=None, _directory=None):
+        if not isinstance(tool, str) or not isinstance(tool_version, str):
+            raise TypeError("tool and tool_version must be strings")
         inherited = os.environ.get(CONTEXT_ENV)
         self.trace, self.parent, self.flags = (
             context(inherited) if inherited is not None else (new_id(16), None, "00"))
@@ -120,33 +165,56 @@ class Writer:
                 if _directory is None:
                     raise
                 self.run = new_id(16)
+        notes = set()
+        data = payload({} if data is None else data, notes)
+        for note in sorted(notes):
+            data = add_note(data, note)
         self._start("run", {
-            **({} if data is None else data),
+            **data,
             "argv": sanitize_argv([] if argv is None else argv),
             "host": socket.gethostname(), "version": tool_version, "pid": self.pid,
         }, self.parent, self.root)
 
     def _write(self, event, state, span, parent, data, **extra):
+        if not isinstance(event, str):
+            raise TypeError("event must be a string")
         if os.getpid() != self.pid:
             warn("writer inherited across fork; create a new writer")
             if self.file is not None:
                 self.file.close()
                 self.file = None
             return
-        data, changed = numbers({} if data is None else data)
-        extra, extra_changed = numbers(extra)
-        if changed or extra_changed:
-            data = add_note(data, "non-finite number replaced with null")
+        error = extra.get("error")
+        if error is not None and (not isinstance(error, dict)
+                or not all(isinstance(error.get(key), str) for key in ("kind", "message"))):
+            raise TypeError("error requires string kind and message")
+        notes = set()
+        data = payload({} if data is None else data, notes)
+        extra = normalize(extra, notes)
+        if error is not None and not isinstance(extra["error"], dict):
+            extra["error"] = {"kind": error["kind"], "message": error["message"],
+                              "context": extra["error"]}
+        for note in sorted(notes):
+            data = add_note(data, note)
         row = dict(v=1, seq=self.seq, tool=self.tool, tool_version=self.tool_version,
                    run=self.run, trace=self.trace, span=span, parent=parent,
                    event=event, state=state,
                    t=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                    data=data, **extra)
-        validate_event(row)
+        # Full envelope validation belongs to the offline checker, not each write.
+        try:
+            line = json.dumps(row, ensure_ascii=False, allow_nan=False)
+        except (TypeError, ValueError, OverflowError, RecursionError):
+            # Includes Python's configured integer-string limit; keep the event.
+            row["data"] = {"value": representation(data),
+                           "notes": ["unserializable value replaced with text"]}
+            if "error" in row:
+                row["error"] = {"kind": "serialization", "message": representation(row["error"])}
+            line = json.dumps(row, ensure_ascii=False, allow_nan=False)
         self.seq += 1
-        # Unix surrogate-escaped filenames become ordinary lossy UTF-8 text.
-        line = json.dumps(row, ensure_ascii=False, allow_nan=False)
-        line = line.encode("utf-8", "surrogateescape").decode("utf-8", "replace")
+        # All UTF-16 surrogates, not just surrogateescape's byte subset, are safe.
+        if not line.isascii():
+            line = re.sub(r"[\ud800-\udfff]", "\ufffd", line)
         if self.file is not None:
             try:
                 self.file.write(line + "\n")
@@ -181,12 +249,27 @@ class Writer:
         if span not in self.active:
             if self.root not in self.active:
                 return  # Closed run: never reopen it for a late point.
-            data = add_note({**({} if data is None else data), "late_span": span}, "point after span end")
+            notes = set()
+            data = payload({} if data is None else data, notes)
+            for note in sorted(notes):
+                data = add_note(data, note)
+            data = add_note({**data, "late_span": span}, "point after span end")
             span = self.root
         extra = {} if error is None else {"error": error}
         self._write(event, "point", span, self.active[span][1], data, **extra)
 
     def end(self, span, outcome, data=None, *, error=None):
+        if span == self.root:
+            message = "run root can only end through close()"
+            if not self.best_effort:
+                raise ValueError(message)
+            warn(message, disabled=False)
+            return
+        self._end(span, outcome, data, error=error)
+
+    def _end(self, span, outcome, data=None, *, error=None):
+        if not isinstance(outcome, str):
+            raise TypeError("outcome must be a string")
         if span not in self.active:
             raise ValueError("inactive span")
         event, parent, begun = self.active[span]
@@ -208,7 +291,7 @@ class Writer:
     def close(self, outcome="ok"):
         if any(span != self.root for span in self.active):
             raise ValueError("local spans still active")
-        self.end(self.root, outcome)
+        self._end(self.root, outcome)
         if self.file is not None:
             try:
                 self.file.close()

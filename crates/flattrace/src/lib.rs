@@ -9,7 +9,8 @@ pub const LEVEL_ENV: &str = "FLATTRACE_LEVEL";
 fn level_from_env() -> (u64, Option<String>) {
     let raw = std::env::var_os(LEVEL_ENV).unwrap_or_default();
     let raw = raw.to_string_lossy();
-    let raw = raw.trim();
+    // Unicode White_Space plus information separators: Python's str.strip set.
+    let raw = raw.trim_matches(|c: char| c.is_whitespace() || matches!(c, '\u{1c}'..='\u{1f}'));
     if raw.is_empty() { return (1, None); }
     if raw.bytes().all(|b| b.is_ascii_digit()) {
         // u64 is the integer representation used by this writer and serde_json.
@@ -18,21 +19,30 @@ fn level_from_env() -> (u64, Option<String>) {
     (1, Some(format!("invalid {LEVEL_ENV} '{raw}' treated as 1")))
 }
 static WARNED: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
-fn warn(error: &io::Error) {
+fn warn(error: &io::Error) { warn_text(&format!("tracing disabled: {error}")); }
+fn warn_text(message: &str) {
     let pid = std::process::id();
     if WARNED.swap(pid, std::sync::atomic::Ordering::Relaxed) != pid {
-        let _ = writeln!(io::stderr(), "flattrace: tracing disabled: {error}");
+        let _ = writeln!(io::stderr(), "flattrace: {message}");
     }
 }
 fn invalid(message: &str) -> io::Error { io::Error::new(io::ErrorKind::InvalidInput, message) }
 fn id(bytes: usize) -> io::Result<String> {
-    // W3C trace/span ID widths; OS entropy on Linux.
-    let mut source = File::open("/dev/urandom")?;
+    read_id(&mut File::open("/dev/urandom")?, bytes)
+}
+fn read_id(source: &mut impl Read, bytes: usize) -> io::Result<String> {
+    // W3C trace/span ID widths; OS entropy on Linux, never a userspace PRNG.
+    const HEX: &[u8] = b"0123456789abcdef";
+    let mut raw = vec![0u8; bytes];
     loop {
-        let mut raw = vec![0u8; bytes];
         source.read_exact(&mut raw)?;
         if raw.iter().any(|v| *v != 0) {
-            return Ok(raw.iter().map(|b| format!("{b:02x}")).collect());
+            let mut value = String::with_capacity(bytes * 2);
+            for byte in raw {
+                value.push(HEX[(byte >> 4) as usize] as char);
+                value.push(HEX[(byte & 15) as usize] as char);
+            }
+            return Ok(value);
         }
     }
 }
@@ -85,23 +95,45 @@ pub fn set_number(data: &mut Value, key: &str, value: f64) -> io::Result<()> {
     data[key] = json!(value);
     Ok(())
 }
+// The same masking set as Python; regexes compile only once, on first argv use.
+static CREDENTIALS: std::sync::LazyLock<[regex::Regex; 5]> = std::sync::LazyLock::new(|| {
+    // Python re.I also folds dotted/dotless i. Python's word set is L/N/underscore;
+    // its whitespace set adds the four information separators to Unicode White_Space.
+    let name = r"(?:token|password|passwd|secret|ap[iİı][-_]?key|access[-_]?key|key)";
+    let space = r"\s\x1c-\x1f";
+    let boundary = r"(^|[^\p{L}\p{N}_])";
+    [
+        format!(r"(?i)^-*{name}$"),
+        format!(r"(?i){boundary}(Author[iİı]zat[iİı]on[{space}]*:[{space}]*)(?:Bearer|Bas[iİı]c)[{space}]+[^{space},;]+"),
+        format!(r"(?i)(https?://)[^/{space}:@]+:[^/{space}@]+@"),
+        format!(r#"(?i){boundary}({name}[{space}]*[=:][{space}]*)(?:"[^"]*"|'[^']*'|[^{space},;&]+)"#),
+        format!(r#"(?i)(-+{name}[{space}]+)(?:"[^"]*"|'[^']*'|[^{space},;]+)"#),
+    ].map(|pattern| regex::Regex::new(&pattern).expect("static credential pattern"))
+});
 pub fn sanitize_argv(argv: Vec<String>) -> Vec<String> {
     let mut hide_next = false;
     argv.into_iter().map(|value| {
         if hide_next { hide_next = false; return "<redacted>".into(); }
-        let (name, assigned) = match value.split_once('=') { Some((k, _)) => (k, true), None => (value.as_str(), false) };
-        let normalized = name.trim_start_matches('-').replace('_', "-").to_ascii_lowercase();
-        if matches!(normalized.as_str(), "token" | "password" | "passwd" | "secret" | "api-key" | "access-key" | "key") {
-            if assigned { return format!("{name}=<redacted>"); }
-            hide_next = true;
+        let rules = &*CREDENTIALS;
+        if let Some((name, _)) = value.split_once('=') {
+            if rules[0].is_match(name) { return format!("{name}=<redacted>"); }
         }
-        value
+        hide_next = rules[0].is_match(&value);
+        let value = rules[1].replace_all(&value, "${1}${2}<redacted>");
+        let value = rules[2].replace_all(&value, "${1}<redacted>@");
+        let value = rules[3].replace_all(&value, "${1}${2}<redacted>");
+        rules[4].replace_all(&value, "${1}<redacted>").into_owned()
     }).collect()
+}
+fn object_data(data: Value) -> Value {
+    if data.is_object() { data }
+    else { json!({"value":data, "notes":["non-object data wrapped in value"]}) }
 }
 
 pub struct Writer {
     file: Option<File>, best_effort: bool, tool: String, version: String, run: String, trace: String,
     root: String, flags: String, pid: u32, seq: u64, level: u64,
+    random: File,
     active: BTreeMap<String, (String, Option<String>, Instant)>,
 }
 impl Writer {
@@ -120,7 +152,7 @@ impl Writer {
             Some(v) if !v.is_empty() => std::path::PathBuf::from(v),
             _ => return Ok(None),
         };
-        if !data.is_object() { return Err(invalid("data must be an object")); }
+        data = object_data(data);
         data["level"] = json!(level);
         if let Some(note) = note { add_note(&mut data, &note); }
         if tool.is_empty() || !tool.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-') {
@@ -144,7 +176,7 @@ impl Writer {
     }
     fn create_at(path: &Path, tool: &str, version: &str, argv: Vec<String>, host: &str,
                  mut data: Value, run: String, best_effort: bool) -> io::Result<Self> {
-        if !data.is_object() { return Err(invalid("data must be an object")); }
+        data = object_data(data);
         let (trace, parent, flags) = match std::env::var(CONTEXT_ENV) {
             Ok(v) => context(&v)?,
             Err(std::env::VarError::NotPresent) => (id(16)?, None, "00".into()),
@@ -154,6 +186,7 @@ impl Writer {
             file: Some(OpenOptions::new().create_new(true).append(true).open(path)?), best_effort,
             tool: tool.into(), version: version.into(), run, trace,
             root: id(8)?, flags, pid: std::process::id(), seq: 0, level: 1, active: BTreeMap::new(),
+            random: File::open("/dev/urandom")?,
         };
         let root = w.root.clone();
         data["argv"] = json!(sanitize_argv(argv));
@@ -170,7 +203,7 @@ impl Writer {
             self.file = None;
             return Ok(());
         }
-        if !data.is_object() { return Err(invalid("data must be an object")); }
+        let data = object_data(data);
         if let Some(e) = &error {
             if !e.is_object() || !e["kind"].is_string() || !e["message"].is_string() {
                 return Err(invalid("error requires string kind and message"));
@@ -213,22 +246,32 @@ impl Writer {
         if event == "run" { return Err(invalid("run is reserved")); }
         let parent = parent.unwrap_or(&self.root).to_owned();
         if !self.active.contains_key(&parent) { return Err(invalid("inactive parent")); }
-        self.begin(event, data, Some(parent), id(8)?)
+        let span = read_id(&mut self.random, 8)?;
+        self.begin(event, data, Some(parent), span)
     }
     pub fn point(&mut self, event: &str, mut data: Value, span: Option<&str>, error: Option<Value>) -> io::Result<()> {
         if event == "run" { return Err(invalid("run is reserved")); }
         let mut span = span.unwrap_or(&self.root).to_owned();
         if !self.active.contains_key(&span) {
             if !self.active.contains_key(&self.root) { return Ok(()); }
-            if !data.is_object() { return Err(invalid("data must be an object")); }
+            data = object_data(data);
             data["late_span"] = json!(span);
             add_note(&mut data, "point after span end");
             span = self.root.clone();
         }
-        let (_, parent, _) = self.active.get(&span).ok_or_else(|| invalid("inactive span"))?.clone();
+        let parent = self.active.get(&span).ok_or_else(|| invalid("inactive span"))?.1.clone();
         self.emit(event, "point", &span, parent.as_deref(), data, None, error)
     }
     pub fn end(&mut self, span: &str, outcome: &str, data: Value, error: Option<Value>) -> io::Result<()> {
+        if span == self.root {
+            let message = "run root can only end through finish()";
+            if !self.best_effort { return Err(invalid(message)); }
+            warn_text(message);
+            return Ok(());
+        }
+        self.end_span(span, outcome, data, error)
+    }
+    fn end_span(&mut self, span: &str, outcome: &str, data: Value, error: Option<Value>) -> io::Result<()> {
         let (event, parent, begun) = self.active.get(span).ok_or_else(|| invalid("inactive span"))?.clone();
         self.emit(&event, "end", span, parent.as_deref(), data,
                   Some((outcome, begun.elapsed().as_secs_f64() * 1000.0)), error)?;
@@ -237,7 +280,7 @@ impl Writer {
     }
     pub fn finish(mut self, outcome: &str) -> io::Result<()> {
         if self.active.keys().any(|span| span != &self.root) { return Err(invalid("local spans still active")); }
-        self.end(&self.root.clone(), outcome, json!({}), None)
+        self.end_span(&self.root.clone(), outcome, json!({}), None)
     }
     // Dropping a writer closes the file without inventing an end.
 }
@@ -251,16 +294,88 @@ mod tests {
         dir.join(format!("rust-{}.jsonl", id(16).unwrap()))
     }
     #[test]
+    fn shared_argv_vectors() {
+        let vectors: Value = serde_json::from_str(include_str!("../../../tests/fixtures/sanitize-argv.json")).unwrap();
+        for vector in vectors.as_array().unwrap() {
+            let argv: Vec<String> = vector["argv"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().into()).collect();
+            assert_eq!(json!(sanitize_argv(argv.clone())), vector["expected"], "{}", vector["name"]);
+            let path = target();
+            Writer::create(&path, "synthetic", "1", argv, "synthetic").unwrap().finish("ok").unwrap();
+            let rows: Vec<Value> = std::fs::read_to_string(&path).unwrap().lines().map(|s| serde_json::from_str(s).unwrap()).collect();
+            assert_eq!(rows[0]["data"]["argv"], vector["expected"]);
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+    #[test]
+    fn only_finish_ends_root() {
+        for harmless in [false, true] {
+            let path = target();
+            let mut w = Writer::create(&path, "synthetic", "1", vec![], "synthetic").unwrap();
+            w.best_effort = harmless;
+            let child = w.start("work", json!({}), None).unwrap();
+            let root = w.root.clone();
+            let result = w.end(&root, "ok", json!({}), None);
+            if harmless { assert!(result.is_ok()); }
+            else { assert!(result.unwrap_err().to_string().contains("root")); }
+            assert!(w.active.contains_key(&root));
+            assert_eq!(std::fs::read_to_string(&path).unwrap().lines().count(), 2);
+            w.end(&child, "ok", json!({}), None).unwrap();
+            w.finish("ok").unwrap();
+            let checked = std::process::Command::new("python3").args(["-m", "flattrace", "check"]).arg(&path)
+                .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")).output().unwrap();
+            assert!(checked.status.success(), "{}", String::from_utf8_lossy(&checked.stdout));
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+    #[test]
+    fn nonobject_payload_degrades_and_writing_continues() {
+        let path = target();
+        let mut w = Writer::create_with_data(&path, "synthetic", "1", vec![], "synthetic", json!(["start"])).unwrap();
+        w.point("payload", json!(["synthetic", 7]), None, None).unwrap();
+        w.point("continued", json!({}), None, None).unwrap();
+        w.finish("ok").unwrap();
+        let rows: Vec<Value> = std::fs::read_to_string(&path).unwrap().lines().map(|s| serde_json::from_str(s).unwrap()).collect();
+        assert_eq!(rows[0]["data"]["value"], json!(["start"]));
+        assert_eq!(rows[1]["data"]["value"], json!(["synthetic", 7]));
+        assert!(rows[1]["data"]["notes"].is_array());
+        assert_eq!(rows[2]["event"], "continued");
+        std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn surrogate_values_cannot_enter_rust_strings() {
+        // Rust strings contain Unicode scalar values; lone surrogates have no representation.
+        assert!(char::from_u32(0xd800).is_none());
+        assert!(serde_json::from_str::<Value>(r#"{"value":"\ud800"}"#).is_err());
+        let path = target();
+        let mut w = Writer::create(&path, "synthetic", "1", vec![], "synthetic").unwrap();
+        w.point("unicode", json!({"value":String::from_utf16_lossy(&[0xd800])}), None, None).unwrap();
+        w.finish("ok").unwrap();
+        let rows: Vec<Value> = std::fs::read_to_string(&path).unwrap().lines().map(|s| serde_json::from_str(s).unwrap()).collect();
+        assert_eq!(rows[1]["data"]["value"], "\u{FFFD}");
+        std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn entropy_ids_retry_zero_and_encode_lowercase_hex() {
+        let raw = vec![0, 0, 0, 0, 0, 0, 0, 0, 0x0f, 0xab, 0xff, 0x01, 0x23, 0x45, 0x67, 0x89];
+        let mut source = io::Cursor::new(raw);
+        assert_eq!(read_id(&mut source, 8).unwrap(), "0fabff0123456789");
+        assert_eq!(source.position(), 16);
+        assert!(read_id(&mut source, 8).is_err());
+    }
+    #[test]
     fn write_read_and_flush() {
         let path = target();
         let mut w = Writer::create(&path, "test", "1", vec![], "test-host").unwrap();
         assert_eq!(std::fs::read_to_string(&path).unwrap().lines().count(), 1);
         let span = w.start("read", json!({"path":"/tmp/input"}), None).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap().lines().count(), 2);
         let p = context(&w.traceparent(Some(&span)).unwrap()).unwrap();
         assert_eq!(p.0, w.trace_id());
         assert_eq!(p.1.as_deref(), Some(span.as_str()));
         w.point("size", json!({"bytes":0}), Some(&span), None).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap().lines().count(), 3);
         w.end(&span, "refused", json!({}), Some(json!({"kind":"input", "message":"not supported"}))).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap().lines().count(), 4);
         w.finish("refused").unwrap();
         let rows: Vec<Value> = std::fs::read_to_string(&path).unwrap().lines()
             .map(|s| serde_json::from_str(s).unwrap()).collect();
@@ -298,9 +413,7 @@ mod tests {
         assert!(data["nan"].is_null() && data["inf"].is_null());
         assert!(data["notes"].is_array());
         w.point("numbers", data, None, None).unwrap();
-        w.end(&w.root.clone(), "ok", json!({}), None).unwrap();
-        w.point("after-close", json!({}), None, None).unwrap();
-        drop(w);
+        w.finish("ok").unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         assert!(!text.contains("fake-token") && !text.contains("fake-pass") && !text.contains("fake-key") && !text.contains("fake-triple"));
         let rows: Vec<Value> = text.lines().map(|s| serde_json::from_str(s).unwrap()).collect();
@@ -384,9 +497,14 @@ mod tests {
     #[test]
     fn invalid_level_is_one_with_note() {
         // One beyond u64's representable range must not stop product work.
-        for raw in ["loud", "-1", "+2", "1.5", "18446744073709551616"] {
+        for raw in ["loud", "-1", "+2", "1.5", "²", "٢", "２", "2²", "18446744073709551616"] {
             level_case(Some(raw), 1, true, false);
         }
+    }
+    #[test]
+    fn level_whitespace_matches_python_unicode_set() {
+        for raw in ["2\u{1c}", "\u{1c}2", "2\u{85}"] { level_case(Some(raw), 2, false, false); }
+        level_case(Some("2\u{feff}"), 1, true, false);
     }
     #[test]
     fn numeric_level_is_recorded() {

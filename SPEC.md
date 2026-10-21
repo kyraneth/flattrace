@@ -1,165 +1,209 @@
 # flattrace v1
 
 Accurate offline records for performance, bugs, benchmarks, hill-climbing and
-RL—not live monitoring. Flat file, deep trace: spans nest to any depth, across
-processes, through `span`/`parent`. One UTF-8 JSON object per appended, flushed line;
-each run owns a fresh file. Flush is not crash persistence. No collector/sampling.
-Published archives may be gzip-compressed as `<name>.jsonl.gz`; the content is the identical JSONL. Readers accept both; writers always write plain JSONL.
+RL—not live monitoring. Flat file, deep trace: spans nest across processes
+through `span`/`parent`. There is no collector or sampling.
 
-The flattrace rename changes names only: the envelope and line format remain
-v1, and files from earlier v1 writers stay valid. Only the environment names
-specified below are supported; there are no previous-name aliases.
+## Normative contract
 
-| Field | Meaning |
+MUST, MUST NOT, SHOULD and MAY below express requirements, recommendations and
+permissions. The [rationale and limits](#rationale-and-limits-non-normative) are
+non-normative. [Learning conventions](docs/learning.md) describe optional payload
+usage; they do not change the envelope or checker behavior.
+
+### Line format and compatibility
+
+- A writer MUST create a fresh file for each run and MUST append one UTF-8 JSON
+  object per line, flushing each line. Writers MUST write plain JSONL. Readers
+  MUST also accept gzip archives named `<name>.jsonl.gz` with identical JSONL
+  content after decompression.
+- The envelope MUST have the following fields and meanings. Readers MUST ignore
+  additive unknown fields; breaking changes MUST bump `v`.
+
+| Field | Requirement / meaning |
 |---|---|
-| `v` | `1` |
-| `seq` | Per-writer line counter from 0; emitted by new writers, optional for legacy v1 |
-| `tool`, `tool_version`, `run` | Tool name/version and process-run ID |
-| `trace` | Nonzero lowercase 32-hex W3C trace ID |
-| `span`, `parent` | Nonzero lowercase 16-hex span IDs; parent null at root |
-| `event`, `state` | Static event name; `start`, `end` or `point` |
-| `t` | RFC3339 UTC, canonical `Z`; wall time for correlation, not duration |
-| `took_ms`, `outcome` | Ends only: local elapsed milliseconds (null if unknown), outcome string |
-| `data` | Tool payload object |
-| `error` | Optional extensible object requiring string `kind` and `message` |
+| `v` | MUST be `1` |
+| `seq` | New writers MUST emit a per-writer integer line counter starting at 0 and increasing by 1; legacy v1 MAY omit it |
+| `tool`, `tool_version`, `run` | MUST identify the tool name/version and process run |
+| `trace` | MUST be a nonzero lowercase 32-hex W3C trace ID |
+| `span`, `parent` | MUST be nonzero lowercase 16-hex span IDs; `parent` MAY be null at an unparented root |
+| `event`, `state` | MUST be a static event name and `start`, `end` or `point` |
+| `t` | MUST be RFC3339 UTC; readers MUST accept both `Z` and `+00:00`, writers SHOULD use `Z` |
+| `took_ms`, `outcome` | MUST occur only on ends: local elapsed milliseconds (null if unknown) and an outcome string |
+| `data` | MUST be a JSON payload object |
+| `error` | MAY be an extensible object; if present MUST contain string `kind` and `message` |
 
-First line: `run` start with `data.argv` (sanitized strings; empty unless supplied),
-`host`, `version`; new writers also emit optional `pid`. Recommended `data.env`
-records known machine/build/
-agent/harness/model facts using the [small vocabulary](docs/environment.md).
-Unknown is null; omitted optional keys mean the tool does not report that fact.
-Never scrape the whole environment. Model/effort changes belong on turn/model spans.
-Last line: matching `run` end. Every start has one matching event/span/parent end;
-missing ends are unfinished, never success. Async children may outlive parents,
-but close/finish refuses active local spans. Points use an active span: a late
-point is recorded on an active run with `data.late_span` and a note; after run
-close it is ignored, never reopened. No crash/exit ends are invented.
+- The rename MUST preserve the v1 envelope and previously valid v1 files;
+  `seq`, `pid` and new payload fields MUST NOT be required of legacy files.
+  Only the environment names specified here are supported; there are no
+  previous-name aliases.
 
-`seq` detects gaps/reordering within a run, not total order across processes;
-Files from earlier v1 writers (without `seq`) remain readable; no new envelope/run field is required. Across files use parentage/links, not
-wall-time sorting. `took_ms` starts **after** the start write and ends before the
-end write; nested instrumentation/waits still cost time. It measures residence,
-not CPU work; never sum nested/overlapping durations or subtract wall timestamps.
-Python `t` has microsecond, Rust nanosecond, Node Date millisecond representation;
-none promises clock accuracy at that resolution. Non-UTF-8 paths are lossy text.
+### Run and span lifecycle
 
-## Activation, ownership and streaming
+- The first line MUST be a `run` start with `data.argv` (sanitized strings,
+  empty unless supplied), `host` and `version`. New writers MAY also emit `pid`.
+  The last line of a complete run MUST be its matching `run` end.
+- Each start in a complete run MUST have exactly one matching event/span/parent
+  end. Missing ends MUST remain unfinished, never inferred success. Writers
+  MUST NOT invent crash, exit or drop ends.
+- A point MUST reuse **both the enclosing active span's ID and its parent**;
+  it MUST NOT allocate a new span or set `parent` to the enclosing span's ID.
+  A late point MUST instead use the active run span and its parent, recording
+  the requested span in `data.late_span` plus a note. After run close it MUST
+  be ignored, never reopen the run.
+- Async children MAY outlive nonroot parents, including locally. The run MUST
+  NOT end while any local nonroot span remains active. Only `close`/`finish`
+  MAY end the root. A direct `end(root)` MUST be refused: explicit-path writers
+  MUST report an API error; environment-mode writers MUST warn and return
+  without raising (Rust returns `Ok(())`), leaving the root active.
+  `close`/`finish` with active local spans MUST remain an API error.
+- `took_ms` MUST measure local elapsed residence, starting after the start write
+  and ending before the end write. Consumers MUST NOT derive durations from
+  wall timestamps or sum nested/overlapping durations as elapsed work.
+- Where `seq` is present, the checker MUST check its continuity and order within
+  a run. Across files consumers SHOULD use parentage/links, not wall-time sorting.
 
-Nonempty `FLATTRACE_DIR` enables tracing; unset/empty means no trace I/O.
-Applications choose whether to set it. Create the directory if needed. Names `YYYYMMDDTHHMMSS.sssZ-tool-run.jsonl` sort by UTC start to millisecond
-precision (shared Node resolution), then lowercase-slug tool/run. Exclusive
-creation retries a fresh random run ID on collision; never overwrite/append.
-An unavailable directory or later sink I/O failure warns once per process on
-stderr, disables that sink and continues product work. Explicit-path helpers
-are strict. flattrace deletes nothing; cleanup is the operator's choice.
-Absence of a trace is not evidence of zero operations.
+### Activation, ownership and failures
 
-`FLATTRACE_TRACEPARENT` carries W3C v00 `00-<trace>-<span>-<flags>`
-(32/16/2 lowercase hex digits). A child reuses trace, parents its run to that
-span, and inherits `FLATTRACE_DIR`; flags never filter local events. Invalid
-context is an error. After fork create a fresh writer with propagated context;
-never reuse an inherited writer (pid mismatch disables it). Python calls must
-be serialized by their owner; Rust requires exclusive `&mut` access; Node owns
-one writer on one event loop, not shared between workers. No shared-file logging.
+- Nonempty `FLATTRACE_DIR` MUST enable a fresh run file; unset/empty MUST mean
+  no trace I/O. The writer MUST create the directory if needed.
+- Environment filenames MUST have the shape
+  `YYYYMMDDTHHMMSS.sssZ-tool-run.jsonl`, with UTC start time to milliseconds and
+  lowercase-slug tool/run. Creation MUST be exclusive, retrying a fresh random
+  run ID on collision, never overwriting or appending an existing file.
+- An unavailable directory or later environment sink I/O failure MUST warn once
+  per process on stderr, disable that sink and continue product work. A disabled
+  writer MUST NOT resume writes to recover missing records. Explicit-path
+  helpers MUST retain I/O errors. Writers MUST NOT delete traces.
+- `FLATTRACE_TRACEPARENT` MUST carry W3C v00
+  `00-<trace>-<span>-<flags>` (32/16/2 lowercase hex digits). A child MUST reuse
+  the trace, parent its run to that span and inherit `FLATTRACE_DIR`; flags MUST
+  NOT filter local events. Invalid context MUST remain an error.
+- After fork the child MUST create a fresh writer with propagated context,
+  never reuse an inherited writer; a pid mismatch MUST disable inherited writes.
+  Python calls MUST be serialized by their owner; Rust MUST require exclusive
+  `&mut` access; Node MUST own one writer on one event loop, not share it
+  between workers. Writers MUST NOT share files across processes.
 
-The file is already a stream (`tail -f`). A separate optional live sender could
-tail `FLATTRACE_DIR`, sending export-cleaned lines per tool and opt-in with an
-in-memory placeholder map for its lifetime. It must wait for complete lines;
-an incomplete tail may be still being written or crashed. Not part of core v1.
-Per-run files plus `check` and `jq` filtering keep long sessions inspectable;
-there is no rotation, retention limit or index machinery.
+### Payload capture and API boundaries
 
-## Learning conventions (all in data)
+- Writers MUST normalize payloads to JSON-safe snapshots without changing caller
+  objects. Unserialisable payload values MUST degrade to safe strings/type
+  placeholders plus a `data.notes` entry, and writing MUST continue. Python and
+  TypeScript normalization MUST handle unsupported nested types and cycles.
+  A nonobject top-level payload MUST become
+  `{"value": <normalized original>, "notes": [...]}` with a note about wrapping.
+- Non-finite numbers MUST become null plus `data.notes` entries. Generated notes
+  MUST be strings; an existing non-array `notes` value MUST be preserved as one
+  array entry. Ordinary unknown nulls MUST NOT gain a replacement note.
+- Rust payloads MUST enter as `serde_json::Value`; unsupported runtime types,
+  cycles and unpaired surrogates cannot cross that type boundary. No general
+  serialization helper is part of this API. Rust callers SHOULD use
+  `set_number` before Value conversion to retain a non-finite replacement note.
+- Payload normalization MUST NOT turn structural API mistakes into success:
+  non-string tool/version/event names, reserved `run` events, inactive
+  spans/parents, malformed error structure and invalid outcome types MUST
+  remain API errors, except the environment-mode
+  direct `end(root)` refusal above. Rust outcomes MUST be `&str`.
+- Full event/stream validation MUST belong to the checker, not a per-line writer
+  validation pass. Event names SHOULD contain no dynamic IDs/paths; values
+  SHOULD go in data. Core outcome strings MUST keep these meanings: `ok`
+  completed, `error` failed, `refused` not admitted, `cancelled` externally
+  stopped, `unknown` unresolved. Extensions MAY be used.
+- Tools SHOULD prefer stable `error.kind` and structured context over sensitive
+  error prose, inline useful facts/summaries, and use optional
+  `{sha256, bytes, path}` references for bulky artifacts. There is no automatic
+  copying, blob store or attachment machinery.
+- Tools SHOULD record known machine/build/agent/harness/model facts in run-start
+  `data.env` using the [small vocabulary](docs/environment.md).
+  Reported-but-unknown facts MUST be null; omitted optional keys mean not reported.
+  Tools MUST NOT scrape the whole environment. Model/effort changes SHOULD be
+  recorded on turn/model spans rather than only the initial header.
 
-Optional run-start IDs: `task`, `variant`, `episode` (stable when replaying the
-same attempt), `attempt` (intentional repeat ordinal), `seed` (integer/string or
-null), `task_hash`, `config_hash` (algorithm-prefixed digests, null if unknown).
-The **comparability block** is this subset of run data, not a second copy:
-`task`, `variant`, `seed`, `task_hash`, `config_hash`, `env`. It is required only
-for benchmark/RL comparability claims; hash inputs/meaning belong to the tool.
-Missing/unknown identities remain evidence, not certified comparable samples.
-Dedup re-exports on `(trace, run)`; intentional executions get new run IDs.
-A retry gets a new span and `data.retry_of` (prior span ID); optional
-`data.links: [{relation, trace, span}]` expresses async completion/fan-in/other
-causality. These are data conventions, never envelope links or replay authority.
+### Tool event files and checking
 
-A grader writes `verdict` point data `{trace, run, name, correct, score, reward,
-reason, grader}`: target IDs, score name, boolean correctness, numeric score and
-reward (each null if unknown), explanation, `{name, version, kind}` grader
-identity (`code`, `model`, `human`, or tool extension). Optional target `span`
-enables step grading; checker-run envelope IDs are not target IDs. Multiple
-grades remain observations, never implicit last-wins. Recording end vs missing
-end is terminated vs truncated; error/cancelled ends are not Gymnasium MDP
-success claims. Only verdicts assert correctness/reward. Exclude unfinished,
-ungraded, cancelled/unknown runs from reward claims; null is not zero.
-[The learning example](examples/learning.py) joins these facts without an optimizer.
+- Each tool MUST own `flattrace-events.json`, containing `tool` and an `events`
+  mapping from names to `kind` (`span`/`point`) and `fields` descriptions with
+  units. **Every event file MUST declare `run` with `kind: "span"`.**
+- An event file MAY include global `required` names and a `commands` mapping
+  command IDs to required arrays. With `commands`, selection MUST use run
+  `data.command` or CLI `--command ID`; legacy writers need no new payload field.
+- `check --events FILE TRACE...` MUST pair spans, reject undeclared names/kinds
+  and check requirements per run, never satisfy them using another run.
+  Tool tests MUST own payload meaning and command/branch coverage; field
+  descriptions MUST NOT imply an executable payload schema.
 
-Event names contain no dynamic IDs/paths; values belong in data. Core outcomes
-have fixed meanings: `ok` completed, `error` failed, `refused` not admitted,
-`cancelled` externally stopped, `unknown` unresolved; extensions are allowed.
-Prefer stable `error.kind` plus structured context over sensitive error prose.
-Inline useful facts/summaries; bulky artifacts may use `{sha256, bytes, path}`
-references in data, with no automatic copying, blob store or attachment machinery.
-Non-finite numbers become null plus `data.notes` entries; generated notes are
-strings, with any existing non-array notes preserved as one array entry.
-Ordinary unknown nulls have no added note. Rust callers use `set_number` before Value conversion:
-serde_json turns non-finite numbers into null before the writer sees them.
+### Detail levels
 
-Each tool owns `flattrace-events.json`: `tool`, `events` mapping names to
-`kind` (`span`/`point`) and `fields` descriptions with units, optional global
-`required` names and optional `commands` mapping command IDs to required arrays.
-`check --events FILE TRACE...` pairs spans, rejects undeclared names/kinds and
-checks requirements **per run**. With `commands`, select via run `data.command`
-or CLI `--command ID`; legacy writers need no new payload field.
-Tool tests own payload meaning and command/branch coverage, not a second schema.
-[Oxblend 1.3.0's event list](examples/oxblend/flattrace-events.json) accompanies
-[real exported examples](examples/oxblend/README.md).
-Analysis can derive disposable paired-span rows (start, duration, outcome,
-unfinished) keyed by `(trace, run, span)`; raw lines remain the only record.
-
-## Detail levels
-
-`FLATTRACE_LEVEL` sets how much a run records; children inherit it like
-`FLATTRACE_DIR`. Unset/empty is `1`. `0` means no trace I/O even when
-`FLATTRACE_DIR` is set. Non-digit values are treated as `1` with a run note.
-Values outside a writer's exact native integer representation use the same
-fallback (Rust: `u64`; TypeScript: safe integer; Python: arbitrary precision).
-Environment writers record the effective value as run-start `data.level`; the
-tool, not the writer, decides what to emit at each level.
-
-- **1, default: rich, no noise.** Every action/command span with its outcome
-  and decisions; state transitions; aggregates in place of high-frequency
-  streams; the full run-start `data.env`. A level-1 trace should explain what
-  happened and why without a firehose.
-- **2+, debug.** Additionally every raw event (each poll, redraw, property
-  write). Tools may define finer meanings above 2.
-
-Aggregates are ordinary events with these `data` conventions, so readers need
-no new envelope field:
+- `FLATTRACE_LEVEL` MUST control how much a run records and MUST be inherited
+  like `FLATTRACE_DIR`. Unset/empty MUST mean `1`; `0` MUST mean no trace I/O even
+  with `FLATTRACE_DIR` set. Writers MUST trim Unicode `White_Space` plus
+  U+001C–U+001F (Python's whitespace set), not U+FEFF. Only ASCII digits `0`–`9`
+  MUST then be parsed as a level; other values MUST fall back to `1` with a run note.
+  Values outside the writer's exact native integer representation MUST use that
+  fallback (Rust `u64`, TypeScript safe integer, Python arbitrary precision).
+  Python's configured integer-string conversion restrictions MUST also use the
+  fallback. Environment writers MUST record the effective `data.level` on
+  run start; tools, not writers, MUST decide what to emit at each level.
+- Level **1** SHOULD be rich without noise: action/command spans, outcomes and
+  decisions, state transitions, aggregates instead of high-frequency streams,
+  and full known-facts `data.env`. Level **2+** SHOULD additionally record raw
+  events (each poll, redraw, property write); tools MAY refine meanings above 2.
+- Aggregates SHOULD use ordinary events with these data conventions:
 
 | Record | Shape |
 |---|---|
-| Coalesced repeats | Any point/span with `count` (integer ≥1: how many occurrences it stands for) and optional `first_t`/`last_t`. An edit adds `target`, `key`, `old` (before the first), `new` (after the last). |
-| Transition | Point with `from` and `to`; emit on change only (e.g. a poll result or UI state flipping), never per poll. |
-| Window summary | Span bounding the window (e.g. `playback.window`); its end carries `stats: {metric: {unit, n, p50, p95, max}}` plus plain counters such as `dropped_frames`. Percentiles are over the window's samples. |
-| Deduplicated error | Point carrying `error` `{kind, message}` plus `where` (`file:line`), `count`, `first_t`, `last_t`; one per distinct `kind` + `where` per run. |
+| Coalesced repeats | Any point/span with `count` (integer ≥1: represented occurrences) and optional `first_t`/`last_t`. An edit adds `target`, `key`, `old` (before first), `new` (after last). |
+| Transition | Point with `from` and `to`; emit only on change, never per poll. |
+| Window summary | Span bounding the window (e.g. `playback.window`); end carries `stats: {metric: {unit, n, p50, p95, max}}` plus counters such as `dropped_frames`. Percentiles are over the window's samples. |
+| Deduplicated error | Point carrying `error` `{kind, message}`, `where` (`file:line`), `count`, `first_t`, `last_t`; one per distinct `kind` + `where` per run. |
 
-In `flattrace-events.json` an event may declare `level` (default `1`).
-`check --events` reports a higher-level event found in a lower-level run and
-does not require events above the run's level.
+- An event MAY declare `level` in `flattrace-events.json` (default `1`).
+  `check --events` MUST report higher-level events in lower-level runs and
+  MUST NOT require events above the run's level.
 
-## Sharing and evolution
+### Sharing and evolution
 
-Never supply credentials: tools sanitize argv/custom secret flags before capture;
-writers also mask common token/password/key options. `flattrace export` is the
-single redaction route for report-a-bug and per-tool opt-in upload. It substitutes
-paths/hosts/user names consistently and masks credential-looking key/value text,
-Authorization headers and URL credentials. It is **not a secret detector**:
-supply ambiguous names explicitly and review paths, hosts, users and error text.
-Only that reviewed export bundle is sent, never raw traces/assets; upload is a
-separate per-tool opt-in. No uploader/server. Originals are untouched. Malformed
-interior lines refuse export; a torn final line is omitted with a numbered
-`.tail.txt` note, never copied unredacted. Unfinished evidence remains unfinished.
+- Tools MUST NOT supply credentials. They MUST sanitize argv/custom secret
+  flags before capture; writers MUST also mask common token/password/key
+  options. `flattrace export` MUST be the single redaction route for report-a-bug
+  and per-tool opt-in upload, substituting paths/hosts/user names consistently
+  and masking credential-looking key/value text, Authorization headers and URL
+  credentials. Users MUST review paths, hosts, users and error text and supply
+  ambiguous names explicitly before sharing.
+- Only a reviewed export bundle MAY be sent, never raw traces/assets; upload
+  MUST be a separate per-tool opt-in. Export MUST leave originals untouched,
+  refuse malformed interior lines, and omit a torn final line with a numbered
+  `.tail.txt` note, never copy its raw bytes unredacted. Unfinished evidence
+  MUST remain unfinished.
 
-Additive fields stay v1; readers ignore unknown fields.
-Breaking changes bump `v`.
+## Rationale and limits (non-normative)
+
+`seq` exposes removed interior records and reordered lines when counters no
+longer follow the expected sequence. It cannot prove durability or completeness:
+flush is not crash persistence, an absent trailing suffix may leave no visible
+gap, and a failed write may never reach disk. Environment sink failure disables
+the writer rather than recovering missing writes, so there may be no later
+counter exposing the loss. Counters do not establish cross-process order or
+cryptographic integrity. Absence of a trace is not evidence of zero operations.
+
+`t` is wall time for correlation, not duration. Python timestamps represent
+microseconds, Rust nanoseconds and Node Date milliseconds; none promises clock
+accuracy at that resolution. `took_ms` includes waits and nested instrumentation,
+not just CPU work. Non-UTF-8 paths are lossy text. serde_json turns non-finite
+numbers into indistinguishable null before the writer sees them unless captured
+with `set_number` first.
+
+The file is already a stream (`tail -f`). A separate optional live sender could
+tail `FLATTRACE_DIR`, sending export-cleaned lines per tool and opt-in with an
+in-memory placeholder map for its lifetime. Such a sender would wait for complete
+lines; an incomplete tail may still be being written or may have crashed. This
+is outside core v1. Per-run files plus `check`/`jq` keep sessions inspectable;
+there is no rotation, retention limit or index machinery. Cleanup is the
+operator's choice. Export is not a secret detector and core supplies no uploader
+or server.
+
+[Oxblend's tool-owned event list](examples/oxblend/flattrace-events.json)
+illustrates command coverage; products own their instrumentation and tests.
+Analysis can derive disposable paired-span rows (start, duration, outcome,
+unfinished) keyed by `(trace, run, span)`; raw lines remain the only record.

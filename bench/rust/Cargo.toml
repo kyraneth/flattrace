@@ -1,0 +1,9 @@
+[package]
+name = "flattrace-writer-bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+flattrace = { path = "../../crates/flattrace" }
+serde_json = "1"

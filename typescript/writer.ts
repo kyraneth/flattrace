@@ -13,7 +13,7 @@ type Options = { argv?: string[]; data?: Data; directory?: string };
 export const CONTEXT_ENV = 'FLATTRACE_TRACEPARENT';
 export const LEVEL_ENV = 'FLATTRACE_LEVEL';
 function levelFromEnv(): [number, string | null] {
-  const raw = (process.env[LEVEL_ENV] ?? '').trim();
+  const raw = (process.env[LEVEL_ENV] ?? '').replace(levelWhitespace, '');
   if (!raw) return [1, null];
   const level = Number(raw);
   // JSON/Number can represent integer levels exactly only in the safe range.
@@ -21,10 +21,11 @@ function levelFromEnv(): [number, string | null] {
   return [1, `invalid ${LEVEL_ENV} '${raw}' treated as 1`];
 }
 let warned = false;
-function warn(error: unknown) {
+function warn(error: unknown, disabled = true) {
   if (!warned) {
-    console.error(`flattrace: tracing disabled: ${error}`);
     warned = true;
+    try { console.error(`flattrace: ${disabled ? 'tracing disabled: ' : ''}${error}`); }
+    catch { /* stderr failure must not interrupt product work */ }
   }
 }
 function ioError(error: unknown): boolean {
@@ -40,35 +41,78 @@ function id(bytes: number): string {
   const value = randomBytes(bytes).toString('hex');
   return /^0+$/.test(value) ? id(bytes) : value;
 }
-function validateJson(value: unknown): void {
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return;
-  if (typeof value === 'number') return; // numbers() handles non-finite values.
-  if (Array.isArray(value)) { value.forEach(validateJson); return; }
-  if (typeof value === 'object' && Object.getPrototypeOf(value) === Object.prototype) {
-    Object.values(value).forEach(validateJson); return;
-  }
-  throw new TypeError('data must contain JSON values');
-}
-function object(data: unknown): asserts data is Data {
-  if (data === null || Array.isArray(data) || typeof data !== 'object') throw new TypeError('data must be an object');
-  validateJson(data);
+// Match Python re.I (including dotted/dotless i) and its Unicode word/space sets.
+const secretName = '(?:token|password|passwd|secret|ap[iİı][-_]?key|access[-_]?key|key)';
+const space = '\\p{White_Space}\\x1c-\\x1f';
+const levelWhitespace = new RegExp(`^[${space}]+|[${space}]+$`, 'gu');
+const boundary = '(?<![\\p{L}\\p{N}_])';
+const flag = new RegExp(`^-*${secretName}$`, 'iu');
+const auth = new RegExp(`${boundary}(Author[iİı]zat[iİı]on[${space}]*:[${space}]*)(?:Bearer|Bas[iİı]c)[${space}]+[^${space},;]+`, 'giu');
+const urlAuth = new RegExp(`(https?://)[^/${space}:@]+:[^/${space}@]+@`, 'giu');
+const assignment = new RegExp(`${boundary}(${secretName}[${space}]*[=:][${space}]*)(?:"[^"]*"|'[^']*'|[^${space},;&]+)`, 'giu');
+const flagText = new RegExp(`(-+${secretName}[${space}]+)(?:"[^"]*"|'[^']*'|[^${space},;]+)`, 'giu');
+function credentialText(value: string): string {
+  return value.replace(auth, '$1<redacted>').replace(urlAuth, '$1<redacted>@')
+    .replace(assignment, '$1<redacted>').replace(flagText, '$1<redacted>');
 }
 export function sanitizeArgv(argv: string[]): string[] {
   let hideNext = false;
   return argv.map(value => {
     if (hideNext) { hideNext = false; return '<redacted>'; }
-    const match = /^-*(token|password|passwd|secret|api[-_]?key|access[-_]?key|key)(=|$)/i.exec(value);
-    if (!match) return value;
-    if (match[2] === '=') return value.slice(0, match[0].length) + '<redacted>';
-    hideNext = true;
-    return value;
+    const equal = value.indexOf('=');
+    if (equal !== -1 && flag.test(value.slice(0, equal))) return value.slice(0, equal + 1) + '<redacted>';
+    hideNext = flag.test(value);
+    return credentialText(value);
   });
 }
-function numbers(value: Json, changed: { value: boolean }): Json {
-  if (typeof value === 'number' && !Number.isFinite(value)) { changed.value = true; return null; }
-  if (Array.isArray(value)) return value.map(item => numbers(item, changed));
-  if (value !== null && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, numbers(item, changed)]));
-  return value;
+type Normalization = { notes: Set<string>; active: Set<object> };
+function normalization(): Normalization { return { notes: new Set(), active: new Set() }; }
+function representation(value: unknown): string {
+  try { return String(value); } catch { return '<unserializable value>'; }
+}
+function object(value: unknown, state: Normalization): Data {
+  const data = numbers(value, state);
+  if (data !== null && !Array.isArray(data) && typeof data === 'object') return data;
+  state.notes.add('non-object data wrapped in value');
+  return { value: data };
+}
+function numbers(value: unknown, state: Normalization): Json {
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) { state.notes.add('non-finite number replaced with null'); return null; }
+    return value;
+  }
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value !== 'object') {
+    state.notes.add('unserializable value replaced with text');
+    return representation(value);
+  }
+  if (state.active.has(value)) {
+    state.notes.add('circular reference replaced with text');
+    return '<circular reference>';
+  }
+  state.active.add(value);
+  try {
+    const read = (key: string): Json => {
+      try { return numbers((value as Record<string, unknown>)[key], state); }
+      catch { state.notes.add('unserializable value replaced with text'); return '<unserializable value>'; }
+    };
+    // Snapshot once; do not invoke caller toJSON hooks. Preserve sparse nulls and __proto__.
+    if (Array.isArray(value)) return Array.from({ length: value.length }, (_, i) => i in value ? read(String(i)) : null);
+    if (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null) {
+      return Object.fromEntries(Object.keys(value).map(key => [key, read(key)]));
+    }
+    state.notes.add('unserializable value replaced with text');
+    return representation(value);
+  } catch {
+    state.notes.add('unserializable value replaced with text');
+    return '<unserializable value>';
+  } finally { state.active.delete(value); }
+}
+function notedObject(value: unknown): Data {
+  const state = normalization();
+  let data = object(value, state);
+  for (const note of [...state.notes].sort()) data = addNote(data, note);
+  return data;
 }
 function addNote(data: Data, note: string): Data {
   const existing = 'notes' in data ? data.notes : [];
@@ -101,7 +145,7 @@ export class Writer {
     const directory = process.env.FLATTRACE_DIR;
     const [level, note] = levelFromEnv();
     if (!directory || level === 0) return null;
-    let data: Data = { ...options.data, level };
+    let data: Data = { ...notedObject(options.data ?? {}), level };
     if (note !== null) data = addNote(data, note);
     try {
       mkdirSync(directory, { recursive: true });
@@ -116,6 +160,7 @@ export class Writer {
   }
 
   constructor(path: string | null, tool: string, version: string, options: Options = {}) {
+    if (typeof tool !== 'string' || typeof version !== 'string') throw new TypeError('tool and tool_version must be strings');
     const inherited = process.env[CONTEXT_ENV];
     [this.trace, this.parent, this.flags] = inherited === undefined ? [id(16), null, '00'] : context(inherited);
     this.tool = tool;
@@ -131,27 +176,32 @@ export class Writer {
         this.run = id(16);
       }
     }
-    this.begin('run', { ...options.data, argv: sanitizeArgv(options.argv ?? []),
+    this.begin('run', { ...notedObject(options.data ?? {}), argv: sanitizeArgv(options.argv ?? []),
       host: hostname(), version, pid: this.pid }, this.parent, this.root);
   }
 
   private emit(event: string, state: string, span: string, parent: string | null, data: Data, extra: Data = {}) {
+    if (typeof event !== 'string') throw new TypeError('event must be a string');
     if (process.pid !== this.pid) {
       warn('writer inherited across fork; create a new writer');
       if (this.file !== null) closeSync(this.file);
       this.file = null;
       return;
     }
-    object(data);
-    object(extra);
-    const changed = { value: false };
-    data = numbers(data, changed) as Data;
-    extra = numbers(extra, changed) as Data;
-    if (changed.value) data = addNote(data, 'non-finite number replaced with null');
-    object(data);
-    const line = JSON.stringify({ v: 1, seq: this.seq++, tool: this.tool, tool_version: this.tool_version,
+    const normalizationState = normalization();
+    data = object(data, normalizationState);
+    extra = object(extra, normalizationState);
+    for (const note of [...normalizationState.notes].sort()) data = addNote(data, note);
+    const row = { v: 1, seq: this.seq++, tool: this.tool, tool_version: this.tool_version,
       run: this.run, trace: this.trace, span, parent, event, state,
-      t: new Date().toISOString(), data, ...extra });
+      t: new Date().toISOString(), data, ...extra };
+    let line: string;
+    try { line = JSON.stringify(row); }
+    catch {
+      row.data = { value: representation(data), notes: ['unserializable value replaced with text'] };
+      if ('error' in row) row.error = { kind: 'serialization', message: representation(row.error) };
+      line = JSON.stringify(row);
+    }
     if (this.file !== null) {
       try { writeFileSync(this.file, line + '\n'); }
       catch (error) {
@@ -181,7 +231,7 @@ export class Writer {
     if (event === 'run') throw new Error('run is reserved');
     if (!this.active.has(span)) {
       if (!this.active.has(this.root)) return;
-      data = addNote({ ...data, late_span: span }, 'point after span end');
+      data = addNote({ ...notedObject(data), late_span: span }, 'point after span end');
       span = this.root;
     }
     const entry = this.entry(span);
@@ -191,9 +241,22 @@ export class Writer {
     if (error === undefined) return {};
     if (error === null || typeof error !== 'object'
       || typeof error.kind !== 'string' || typeof error.message !== 'string') throw new TypeError('error requires string kind and message');
+    if (Object.getPrototypeOf(error) !== Object.prototype && Object.getPrototypeOf(error) !== null) {
+      // Keep required error structure even when its caller context needs degradation.
+      return { error: { kind: error.kind, message: error.message, context: error } };
+    }
     return { error };
   }
   end(span: string, outcome: string, data: Data = {}, error?: TraceError): void {
+    if (span === this.root) {
+      const message = 'run root can only end through close()';
+      if (!this.bestEffort) throw new Error(message);
+      warn(message, false);
+      return;
+    }
+    this.endSpan(span, outcome, data, error);
+  }
+  private endSpan(span: string, outcome: string, data: Data = {}, error?: TraceError): void {
     const entry = this.entry(span);
     if (typeof outcome !== 'string') throw new TypeError('outcome must be a string');
     this.emit(entry.event, 'end', span, entry.parent, data,
@@ -209,7 +272,7 @@ export class Writer {
   }
   close(outcome = 'ok'): void {
     if ([...this.active.keys()].some(span => span !== this.root)) throw new Error('local spans still active');
-    this.end(this.root, outcome);
+    this.endSpan(this.root, outcome);
     if (this.file !== null) {
       try { closeSync(this.file); }
       catch (error) {

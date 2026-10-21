@@ -1,0 +1,32 @@
+[
+  {
+    "name": "flags",
+    "argv": ["--token", "synthetic", "--PASSWORD=synthetic", "---passwd", "synthetic", "secret=synthetic", "--api-key", "synthetic", "--api_key=synthetic", "--apikey=synthetic", "--accesskey", "synthetic", "--access-key=synthetic", "--access_key", "synthetic", "key=synthetic", "--key", "synthetic", "--token=", "token", "synthetic"],
+    "expected": ["--token", "<redacted>", "--PASSWORD=<redacted>", "---passwd", "<redacted>", "secret=<redacted>", "--api-key", "<redacted>", "--api_key=<redacted>", "--apikey=<redacted>", "--accesskey", "<redacted>", "--access-key=<redacted>", "--access_key", "<redacted>", "key=<redacted>", "--key", "<redacted>", "--token=<redacted>", "token", "<redacted>"]
+  },
+  {
+    "name": "urls-and-headers",
+    "argv": ["https://u:p@example.test/path", "HTTP://u:p:q@example.test", "prefix Authorization: Bearer synthetic; tail", "Authorization: Basic synthetic,other", "authorization:bearer synthetic", "https://example.test/path", "ftp://u:p@example.test", "https://u@example.test"],
+    "expected": ["https://<redacted>@example.test/path", "HTTP://<redacted>@example.test", "prefix Authorization: <redacted>; tail", "Authorization: <redacted>,other", "authorization:<redacted>", "https://example.test/path", "ftp://u:p@example.test", "https://u@example.test"]
+  },
+  {
+    "name": "text-assignments",
+    "argv": ["token: 'synthetic value' and password=\"synthetic value\"", "--secret synthetic --key 'synthetic value'", "api_key = synthetic&accesskey:synthetic", "token=synthetic,foo", "--token=synthetic=extra", "Bearer synthetic", "Authorization: Digest synthetic", "key=synthetic; token=synthetic"],
+    "expected": ["token: <redacted> and password=<redacted>", "--secret <redacted> --key <redacted>", "api_key = <redacted>&accesskey:<redacted>", "token=<redacted>", "--token=<redacted>", "Bearer synthetic", "Authorization: Digest synthetic", "key=<redacted>"]
+  },
+  {
+    "name": "nonsecret-and-boundaries",
+    "argv": ["--tokens", "synthetic", "monkey=synthetic", "some_token=synthetic", "--keybinding=synthetic", "notAuthorization: Bearer synthetic", "https://u:p/example.test", "--api--key=synthetic", "normal", "--token"],
+    "expected": ["--tokens", "synthetic", "monkey=synthetic", "some_token=synthetic", "--keybinding=synthetic", "notAuthorization: Bearer synthetic", "https://u:p/example.test", "--api--key=<redacted>", "normal", "--token"]
+  },
+  {
+    "name": "terminal-newline",
+    "argv": ["--token\n", "visible", "--key\n=synthetic", "key\u001c=\u001csynthetic", "key﻿=synthetic"],
+    "expected": ["--token\n", "visible", "--key\n<redacted>", "key\u001c=\u001c<redacted>", "key﻿=synthetic"]
+  },
+  {
+    "name": "unicode-boundaries",
+    "argv": ["ékey=synthetic", "éAuthorization: Bearer synthetic", "--ſecret=synthetic", "--apıkey=synthetic", "--apİkey=synthetic", "--Key=synthetic", "token = synthetic"],
+    "expected": ["ékey=synthetic", "éAuthorization: Bearer synthetic", "--ſecret=<redacted>", "--apıkey=<redacted>", "--apİkey=<redacted>", "--Key=<redacted>", "token = <redacted>"]
+  }
+]

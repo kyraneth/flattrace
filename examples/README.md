@@ -19,4 +19,7 @@ python3 -m flattrace check tests/fixtures/synthetic/5.jsonl # expected exit 1
 
 A hill-climber must compare matching task/config identities and graders, not
 labels alone; failure is not a fast success. No performance claim follows from
-synthetic timings or the operational examples. See [SPEC.md](../SPEC.md).
+synthetic timings or the operational examples. See the extracted
+[learning conventions](../docs/learning.md) for optional comparability identities,
+grading/reward limits and the synthetic fixtures' hash inputs; these conventions
+do not change [the core format](../SPEC.md).
