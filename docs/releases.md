@@ -6,6 +6,14 @@ Rust and Node code without publishing credentials. Separate fresh jobs receive
 only the completed build artifacts and the permission needed by their registry.
 No stored publishing token is used.
 
+## Forgejo first
+
+Every commit that reaches GitHub must already exist on the private Forgejo
+branch `main`, byte for byte. Push Forgejo first, then push the same commit to
+GitHub `main` as a fast-forward. Never author or rewrite commits at GitHub push
+time. Forgejo carries internal development, issue tracking and planning;
+material that must stay private is kept off its `main` branch.
+
 ## Review before publishing
 
 1. Select a release commit containing the pinned `uv_build` configuration. Use a

@@ -1,16 +1,14 @@
 # flattrace
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/logo/flattrace-wordmark-dark.svg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/logo/flattrace-wordmark-light.svg">
-  <img alt="flattrace" src="assets/logo/flattrace-wordmark-light.svg" width="444">
+  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/kyraneth/flattrace/main/assets/logo/flattrace-wordmark-dark.svg">
+  <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/kyraneth/flattrace/main/assets/logo/flattrace-wordmark-light.svg">
+  <img alt="flattrace" src="https://raw.githubusercontent.com/kyraneth/flattrace/main/assets/logo/flattrace-wordmark-light.svg" width="444">
 </picture>
 
 **Flat file, deep trace.** flattrace records what a tool did as small, local JSONL events: nested steps, outcomes, errors and measured durations, even across child processes. Python, Rust and TypeScript writers share one v1 envelope. Check traces, find slow steps and redact a bundle for a bug report—all offline, without a collector, server or account. Code, docs and examples are [MIT licensed](LICENSE).
 
 ## Install
-
-Registry packages are **coming soon**; these commands become valid after publication:
 
 ```sh
 pip install flattrace                 # Python writer + flattrace CLI
@@ -18,10 +16,12 @@ cargo add flattrace serde_json        # Rust writer (Linux)
 npm install flattrace                 # Node writer + TypeScript declarations
 ```
 
-Until then, from a checkout: `python3 -m pip install .`; use
-`flattrace = { path = "../flattrace/crates/flattrace" }` in Cargo.toml;
-or run `npm --prefix typescript install && npm --prefix typescript run build`
-and `npm install ./typescript` in your Node project. Rust also needs `serde_json`.
+Packages: [PyPI](https://pypi.org/project/flattrace/),
+[crates.io](https://crates.io/crates/flattrace) and
+[npm](https://www.npmjs.com/package/flattrace). To work from a checkout instead:
+`python3 -m pip install .`; `flattrace = { path = "../flattrace/crates/flattrace" }`
+in Cargo.toml; or `npm --prefix typescript install && npm --prefix typescript run build`
+then `npm install ./typescript`. Rust also needs `serde_json`.
 Python requires 3.10+, Node requires 22.18+, and Rust targets Linux.
 
 ## Quickstart

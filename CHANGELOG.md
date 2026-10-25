@@ -2,7 +2,7 @@
 
 ## 0.1.0
 
-Initial package release candidate (registry publication pending).
+Initial release, published to PyPI, crates.io and npm.
 
 - Python, Linux Rust and Node TypeScript synchronous writers with the same v1
   JSONL envelope, W3C traceparent propagation and one file per process run.
