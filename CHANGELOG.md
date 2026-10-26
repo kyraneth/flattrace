@@ -15,6 +15,9 @@
   publish gates; no sdist that needs a Rust toolchain.
 - Conformance corpus with golden outputs asserted from Rust, CLI, Python and
   Node; frozen reader contract in `docs/reader.md`.
+- Writer run-end data: `close(data=...)` / `finish_with` carry an optional
+  run-end payload (e.g. run totals), normalized like any other payload;
+  omitted means `{}`. Rust writer crate bumped to 0.2.0.
 
 ## 0.1.0
 

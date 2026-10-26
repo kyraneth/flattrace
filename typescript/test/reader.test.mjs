@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { basename, join } from 'node:path';
+import { join } from 'node:path';
 import { bindingFile, EngineUnavailable } from '../reader.ts';
 import * as reader from '../reader.ts';
 
@@ -27,7 +27,12 @@ function rel(value) {
   if (Array.isArray(value)) return value.map(rel);
   if (value && typeof value === 'object') {
     return Object.fromEntries(
-      Object.entries(value).map(([k, v]) => [k, k === 'file' && typeof v === 'string' ? basename(v) : rel(v)])
+      Object.entries(value).map(([k, v]) => {
+        if (k === 'file' && typeof v === 'string' && v.startsWith(corpus + '/')) {
+          v = v.slice((corpus + '/').length);
+        }
+        return [k, rel(v)];
+      })
     );
   }
   return value;
@@ -155,4 +160,11 @@ test('compare matches golden', () => {
 
 test('overlap matches golden', () => {
   checkGolden('overlap.json', reader.overlap(corpusFiles(), 'loop.stall', { event: 'tool.exec' }));
+});
+
+test('spans run-end data matches golden', () => {
+  const rows = reader.spans([join(corpus, 'closedata', '01.jsonl')]);
+  const run = rows.find((r) => r.event === 'run');
+  assert.deepEqual(run.end_data, { turns: 3, tokens: 42, totals: { took_ms: 40 } });
+  checkGolden('spans_runend.json', rows);
 });

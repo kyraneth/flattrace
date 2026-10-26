@@ -1,80 +1,17 @@
 // SPDX-License-Identifier: MIT
 //! D3 query surface over a loaded corpus: filters, group keys and the
 //! check/spans/digest/group/tree/compare/overlap functions.
+//! Selection reads typed in-memory span records in file and start order;
+//! only quantile samples spill to SQLite.
 
-use crate::pair::Corpus;
+use crate::pair::{Corpus, RunRec, SpanRec};
 use crate::validate::parse_timestamp;
-use rusqlite::params;
 use serde_json::{json, Value};
 use std::collections::{BTreeMap, HashMap};
 use std::io;
 
-pub struct SpanRow {
-    pub run_idx: i64,
-    pub file: String,
-    pub span: String,
-    pub parent: Value,
-    pub event: String,
-    pub tool: String,
-    pub tool_version: String,
-    pub trace: String,
-    pub run: String,
-    pub start_t: String,
-    pub start_seq: Value,
-    pub end_t: Value,
-    pub end_seq: Value,
-    pub took: Value,
-    pub outcome: Value,
-    pub unfinished: bool,
-    pub depth: i64,
-    pub children: Vec<String>,
-    pub data: Value,
-    pub end_data: Value,
-    pub error: Value,
-    pub self_ms: Value,
-    pub self_unknown: Value,
-    pub points: Vec<Value>,
-    pub agent: Option<String>,
-}
-
-fn parse_json(text: &str) -> Value {
-    serde_json::from_str(text).unwrap_or(Value::Null)
-}
-
-fn all_spans(corpus: &Corpus) -> io::Result<Vec<SpanRow>> {
-    let err = |e: rusqlite::Error| io::Error::new(io::ErrorKind::Other, e.to_string());
-    let conn = corpus.store.connection();
-    let mut stmt = conn.prepare(
-        "SELECT s.run_idx, s.file, s.span, s.parent_json, s.event, s.tool, s.tool_version,
-          s.trace, s.run, s.start_t, s.start_seq, s.end_t, s.end_seq, s.took, s.outcome,
-          s.unfinished, s.depth, s.children, s.data, s.end_data, s.error, s.self_ms,
-          s.self_unknown, s.points, r.agent
-         FROM span s JOIN run r ON r.idx = s.run_idx AND r.duplicate = 0 ORDER BY s.id").map_err(err)?;
-    let rows = stmt.query_map([], |row: &rusqlite::Row| {
-        let children: Vec<Value> = serde_json::from_str(&row.get::<_, String>(17)?).unwrap_or_default();
-        Ok(SpanRow {
-            run_idx: row.get(0)?, file: row.get(1)?, span: row.get(2)?,
-            parent: parse_json(&row.get::<_, String>(3)?),
-            event: row.get(4)?, tool: row.get(5)?, tool_version: row.get(6)?,
-            trace: row.get(7)?, run: row.get(8)?, start_t: row.get(9)?,
-            start_seq: parse_json(&row.get::<_, String>(10)?),
-            end_t: row.get::<_, Option<String>>(11)?.map(|s| parse_json(&s)).unwrap_or(Value::Null),
-            end_seq: row.get::<_, Option<String>>(12)?.map(|s| parse_json(&s)).unwrap_or(Value::Null),
-            took: parse_json(&row.get::<_, String>(13)?),
-            outcome: parse_json(&row.get::<_, String>(14)?),
-            unfinished: row.get::<_, i64>(15)? != 0,
-            depth: row.get(16)?,
-            children: children.into_iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect(),
-            data: parse_json(&row.get::<_, String>(18)?),
-            end_data: row.get::<_, Option<String>>(19)?.map(|s| parse_json(&s)).unwrap_or(Value::Null),
-            error: parse_json(&row.get::<_, String>(20)?),
-            self_ms: parse_json(&row.get::<_, String>(21)?),
-            self_unknown: parse_json(&row.get::<_, String>(22)?),
-            points: serde_json::from_str(&row.get::<_, String>(23)?).unwrap_or_default(),
-            agent: row.get::<_, Option<String>>(24)?,
-        })
-    }).map_err(err)?;
-    rows.collect::<Result<Vec<_>, _>>().map_err(err)
+fn env_of(header: &Value) -> Value {
+    header.get("env").cloned().unwrap_or(Value::Null)
 }
 
 fn get_path(data: &Value, dotted: &str) -> Value {
@@ -88,18 +25,17 @@ fn get_path(data: &Value, dotted: &str) -> Value {
     current.clone()
 }
 
-fn model_of(span: &SpanRow, header_env: &Value) -> Value {
-    let start = &span.data;
+fn model_of(span: &SpanRec, env: &Value) -> Value {
     for key in ["gen_ai.request.model", "model"] {
-        let value = get_path(start, key);
+        let value = get_path(&span.data, key);
         if !value.is_null() {
             return value;
         }
     }
-    get_path(header_env, "gen_ai.request.model")
+    get_path(env, "gen_ai.request.model")
 }
 
-fn session_of(span: &SpanRow, header: &Value) -> Value {
+fn session_of(span: &SpanRec, header: &Value) -> Value {
     for key in ["session_id", "session"] {
         let value = span.data.get(key).cloned().unwrap_or(Value::Null);
         if !value.is_null() {
@@ -113,7 +49,16 @@ fn session_of(span: &SpanRow, header: &Value) -> Value {
     Value::Null
 }
 
-fn error_records(span: &SpanRow) -> Vec<BTreeMap<String, Value>> {
+fn count_of(data: &Value) -> Value {
+    match data.get("count") {
+        Some(Value::Number(n)) if n.as_i64().map(|v| v >= 1).unwrap_or(false) => {
+            Value::Number(n.as_i64().unwrap().into())
+        }
+        _ => json!(1),
+    }
+}
+
+fn error_records(span: &SpanRec) -> Vec<BTreeMap<String, Value>> {
     let mut records = Vec::new();
     if !span.error.is_null() || span.outcome.as_str() == Some("error") {
         let error = if span.error.is_null() { &Value::Null } else { &span.error };
@@ -125,25 +70,16 @@ fn error_records(span: &SpanRow) -> Vec<BTreeMap<String, Value>> {
         ]));
     }
     for point in &span.points {
-        if let Some(error) = point.get("error").filter(|e| !e.is_null()) {
+        if !point.error.is_null() {
             records.push(BTreeMap::from([
-                ("kind".to_string(), error.get("kind").cloned().unwrap_or(Value::Null)),
-                ("message".to_string(), error.get("message").cloned().unwrap_or(Value::Null)),
-                ("where".to_string(), get_path(point.get("data").unwrap_or(&Value::Null), "where")),
-                ("count".to_string(), count_of(point.get("data").unwrap_or(&Value::Null))),
+                ("kind".to_string(), point.error.get("kind").cloned().unwrap_or(Value::Null)),
+                ("message".to_string(), point.error.get("message").cloned().unwrap_or(Value::Null)),
+                ("where".to_string(), get_path(&point.data, "where")),
+                ("count".to_string(), count_of(&point.data)),
             ]));
         }
     }
     records
-}
-
-fn count_of(data: &Value) -> Value {
-    match data.get("count") {
-        Some(Value::Number(n)) if n.as_i64().map(|v| v >= 1).unwrap_or(false) => {
-            Value::Number(n.as_i64().unwrap().into())
-        }
-        _ => json!(1),
-    }
 }
 
 fn error_summary(records: &[BTreeMap<String, Value>]) -> Value {
@@ -151,11 +87,17 @@ fn error_summary(records: &[BTreeMap<String, Value>]) -> Value {
     json!({ "records": records.len(), "occurrences": occurrences })
 }
 
-fn span_value(span: &SpanRow, header: &Value, header_env: &Value, name: &str) -> Result<Value, String> {
+fn agent_of(run: &RunRec) -> Value {
+    run.agent.clone().map(Value::String).unwrap_or(Value::Null)
+}
+
+fn span_value(span: &SpanRec, run: &RunRec, name: &str) -> Result<Value, String> {
+    let header = &run.header;
+    let env = env_of(header);
     match name {
         "outcome" => Ok(if span.unfinished { json!("unfinished") } else { span.outcome.clone() }),
-        "agent" => Ok(span.agent.clone().map(Value::String).unwrap_or(Value::Null)),
-        "model" => Ok(model_of(span, header_env)),
+        "agent" => Ok(agent_of(run)),
+        "model" => Ok(model_of(span, &env)),
         "session" => Ok(session_of(span, header)),
         "tool" => Ok(Value::String(span.tool.clone())),
         "event" => Ok(Value::String(span.event.clone())),
@@ -177,22 +119,6 @@ fn span_value(span: &SpanRow, header: &Value, header_env: &Value, name: &str) ->
     }
 }
 
-fn headers(corpus: &Corpus) -> io::Result<HashMap<i64, (Value, Value)>> {
-    let err = |e: rusqlite::Error| io::Error::new(io::ErrorKind::Other, e.to_string());
-    let conn = corpus.store.connection();
-    let mut stmt = conn.prepare("SELECT idx, header FROM run").map_err(err)?;
-    let rows = stmt.query_map([], |row: &rusqlite::Row| {
-        let header: String = row.get(1)?;
-        Ok((row.get::<_, i64>(0)?, parse_json(&header)))
-    }).map_err(err)?;
-    let mut map = HashMap::new();
-    for (idx, header) in rows.collect::<Result<Vec<_>, _>>().map_err(err)? {
-        let env = header.get("env").cloned().unwrap_or(Value::Null);
-        map.insert(idx, (header, env));
-    }
-    Ok(map)
-}
-
 fn as_list(value: &Value) -> Vec<Value> {
     match value {
         Value::Array(items) => items.clone(),
@@ -200,7 +126,9 @@ fn as_list(value: &Value) -> Vec<Value> {
     }
 }
 
-fn matches(span: &SpanRow, header: &Value, env: &Value, filt: &BTreeMap<String, Value>) -> Result<bool, String> {
+fn matches(span: &SpanRec, run: &RunRec, filt: &BTreeMap<String, Value>) -> Result<bool, String> {
+    let header = &run.header;
+    let env = env_of(header);
     for key in ["tool", "event", "trace", "run"] {
         if let Some(want) = filt.get(key) {
             let actual = match key {
@@ -226,13 +154,12 @@ fn matches(span: &SpanRow, header: &Value, env: &Value, filt: &BTreeMap<String, 
         }
     }
     if let Some(want) = filt.get("agent") {
-        let actual = span.agent.clone().map(Value::String).unwrap_or(Value::Null);
-        if &actual != want {
+        if &agent_of(run) != want {
             return Ok(false);
         }
     }
     if let Some(want) = filt.get("model") {
-        if &model_of(span, env) != want {
+        if &model_of(span, &env) != want {
             return Ok(false);
         }
     }
@@ -286,40 +213,31 @@ fn parse_filter(value: Option<&Value>) -> Result<BTreeMap<String, Value>, String
     }
 }
 
-pub struct Selected {
-    pub span: SpanRow,
-    pub header: Value,
-    pub env: Value,
+pub struct Selected<'a> {
+    pub span: &'a SpanRec,
+    pub run: &'a RunRec,
 }
 
-pub fn select_spans(corpus: &Corpus, filt: Option<&Value>) -> Result<Vec<Selected>, String> {
+pub fn select_spans<'a>(corpus: &'a Corpus, filt: Option<&Value>) -> Result<Vec<Selected<'a>>, String> {
     let filt = parse_filter(filt)?;
-    let heads = headers(corpus).map_err(|e| e.to_string())?;
-    let spans = all_spans(corpus).map_err(|e| e.to_string())?;
-    let mut positions: HashMap<i64, usize> = HashMap::new();
-    {
-        let err = |e: rusqlite::Error| e.to_string();
-        let conn = corpus.store.connection();
-        let mut stmt = conn.prepare("SELECT idx FROM run ORDER BY idx").map_err(err)?;
-        let ids = stmt.query_map([], |row: &rusqlite::Row| row.get::<_, i64>(0)).map_err(err)?
-            .collect::<Result<Vec<_>, _>>().map_err(err)?;
-        for (position, idx) in ids.iter().enumerate() {
-            positions.insert(*idx, position);
-        }
-    }
     let mut out = Vec::new();
-    for span in spans {
-        let (header, env) = heads.get(&span.run_idx).cloned().unwrap_or((Value::Null, Value::Null));
-        if matches(&span, &header, &env, &filt)? {
-            out.push(Selected { span, header, env });
+    for (run_position, run) in corpus.runs.iter().enumerate() {
+        if run.duplicate {
+            continue;
         }
+        let mut members: Vec<Selected> = Vec::new();
+        for &index in &corpus.spans_by_run[run_position] {
+            let span = &corpus.spans[index];
+            if matches(span, run, &filt)? {
+                members.push(Selected { span, run });
+            }
+        }
+        members.sort_by(|a, b| {
+            let key = |s: &Selected| (!s.span.start_seq.is_null(), s.span.start_seq.as_u64().unwrap_or(0));
+            key(a).partial_cmp(&key(b)).unwrap_or(std::cmp::Ordering::Equal)
+        });
+        out.extend(members);
     }
-    out.sort_by(|a, b| {
-        let position = |s: &Selected| positions.get(&s.span.run_idx).cloned().unwrap_or(usize::MAX);
-        let sequence = |s: &Selected| (!s.span.start_seq.is_null(), s.span.start_seq.as_i64().unwrap_or(0));
-        (position(a), sequence(a)).partial_cmp(&(position(b), sequence(b)))
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
     Ok(out)
 }
 
@@ -327,82 +245,92 @@ fn pointer(file: &str, start_seq: &Value, span: &str) -> Value {
     json!({ "file": file, "start_seq": start_seq, "span": span })
 }
 
-fn pointer_of(span: &SpanRow) -> Value {
+fn pointer_of(span: &SpanRec) -> Value {
     pointer(&span.file, &span.start_seq, &span.span)
 }
 
 pub fn coverage(corpus: &Corpus) -> Result<Value, String> {
-    let err = |e: rusqlite::Error| io::Error::new(io::ErrorKind::Other, e.to_string());
-    let conn = corpus.store.connection();
-    let runs: i64 = conn.query_row("SELECT COUNT(*) FROM run WHERE duplicate = 0", [], |r: &rusqlite::Row| r.get(0)).map_err(err).map_err(|e| e.to_string())?;
-    let complete: i64 = conn.query_row("SELECT COUNT(*) FROM run WHERE duplicate = 0 AND status != 'unfinished'", [], |r: &rusqlite::Row| r.get(0)).map_err(err).map_err(|e| e.to_string())?;
-    let spans: i64 = conn.query_row("SELECT COUNT(*) FROM span s JOIN run r ON r.idx = s.run_idx AND r.duplicate = 0", [], |r: &rusqlite::Row| r.get(0)).map_err(err).map_err(|e| e.to_string())?;
-    let unfinished: i64 = conn.query_row("SELECT COUNT(*) FROM span s JOIN run r ON r.idx = s.run_idx AND r.duplicate = 0 WHERE s.unfinished = 1", [], |r: &rusqlite::Row| r.get(0)).map_err(err).map_err(|e| e.to_string())?;
-    let points = points_in(conn, "SELECT points FROM span s JOIN run r ON r.idx = s.run_idx AND r.duplicate = 0")?;
-    // Coverage counts run/pairing/boundary evidence per run, like the
-    // reference: malformed-line details are check-level (see check output).
-    let issues: i64 = {
-        let mut stmt = conn.prepare("SELECT issue_counts FROM run WHERE duplicate = 0").map_err(err).map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |r: &rusqlite::Row| r.get::<_, String>(0)).map_err(err).map_err(|e| e.to_string())?;
-        let mut total = 0;
-        for text in rows.collect::<Result<Vec<_>, _>>().map_err(err).map_err(|e| e.to_string())? {
-            let counts: BTreeMap<String, i64> = serde_json::from_str(&text).unwrap_or_default();
-            for (category, count) in counts {
-                if category != "line" && category != "incomplete tail"
-                    && category != "incomplete gzip archive" {
-                    total += count;
-                }
+    let mut runs = 0;
+    let mut complete = 0;
+    let mut invalid = 0;
+    let mut duplicates = 0;
+    let mut issues = 0;
+    for run in &corpus.runs {
+        if run.duplicate {
+            duplicates += 1;
+            continue;
+        }
+        runs += 1;
+        if run.status != "unfinished" {
+            complete += 1;
+        }
+        for (category, count) in &run.issue_counts {
+            if category != "line" && category != "incomplete tail"
+                && category != "incomplete gzip archive" {
+                issues += count;
             }
         }
-        total
-    };
-    let duplicates = corpus.files.iter().filter(|f| f.duplicate).count() as i64;
-    let invalid = corpus.files.iter().filter(|f| f.invalid).count() as i64;
+    }
+    for file in &corpus.files {
+        if file.invalid {
+            invalid += 1;
+        }
+    }
+    let mut spans = 0;
+    let mut unfinished_spans = 0;
+    let mut points = 0;
+    for span in &corpus.spans {
+        if corpus.runs.get(span.run_idx).map(|r| r.duplicate).unwrap_or(true) {
+            continue;
+        }
+        spans += 1;
+        if span.unfinished {
+            unfinished_spans += 1;
+        }
+        points += span.points.len() as i64;
+    }
     let statement = format!(
         "{} files, {} runs ({} complete, {} unfinished, {} invalid), {} duplicate excluded, {} spans paired ({} unfinished), {} points, {} issues",
         corpus.files.len(), runs, complete, runs - complete, invalid,
-        duplicates, spans, unfinished, points, issues);
+        duplicates, spans, unfinished_spans, points, issues);
     Ok(json!({
         "files": corpus.files.len(), "runs": runs,
         "complete_runs": complete, "unfinished_runs": runs - complete,
         "invalid_files": invalid, "duplicates_excluded": duplicates,
-        "spans": spans, "spans_unfinished": unfinished,
+        "spans": spans, "spans_unfinished": unfinished_spans,
         "points": points, "issues": issues,
         "statement": statement,
     }))
 }
 
-fn points_in(conn: &rusqlite::Connection, sql: &str) -> Result<i64, String> {
-    let err = |e: rusqlite::Error| e.to_string();
-    let mut stmt = conn.prepare(sql).map_err(err)?;
-    let rows = stmt.query_map([], |r: &rusqlite::Row| r.get::<_, String>(0)).map_err(err)?;
-    let mut total = 0;
-    for text in rows.collect::<Result<Vec<_>, _>>().map_err(err)? {
-        let points: Vec<Value> = serde_json::from_str(&text).unwrap_or_default();
-        total += points.len() as i64;
+fn span_json(span: &SpanRec) -> Value {
+    let mut points = Vec::new();
+    for point in &span.points {
+        points.push(json!({
+            "event": point.event, "t": point.t, "seq": point.seq,
+            "data": point.data, "error": point.error,
+        }));
     }
-    Ok(total)
-}
-
-fn span_json(span: &SpanRow) -> Value {
     json!({
         "file": span.file, "trace": span.trace, "run": span.run,
-        "span": span.span, "parent": span.parent, "tool": span.tool,
-        "tool_version": span.tool_version, "event": span.event,
+        "span": span.span, "parent": span.parent.clone().map(Value::String).unwrap_or(Value::Null),
+        "tool": span.tool, "tool_version": span.tool_version, "event": span.event,
         "start_t": span.start_t, "start_seq": span.start_seq,
-        "end_t": span.end_t, "end_seq": span.end_seq,
+        "end_t": span.end_t.clone().map(Value::String).unwrap_or(Value::Null),
+        "end_seq": span.end_seq,
         "took_ms": span.took, "outcome": span.outcome,
         "unfinished": span.unfinished, "depth": span.depth,
         "children": span.children, "data": span.data,
         "end_data": span.end_data, "error": span.error,
-        "self_ms": span.self_ms, "self_unknown": span.self_unknown,
-        "points": span.points,
+        "self_ms": span.self_ms,
+        "self_unknown": span.self_unknown.clone().map(Value::String).unwrap_or(Value::Null),
+        "points": points,
     })
 }
 
 pub fn spans(corpus: &Corpus, filt: Option<&Value>) -> Result<Value, String> {
     let selected = select_spans(corpus, filt)?;
-    Ok(Value::Array(selected.iter().map(|s| span_json(&s.span)).collect()))
+    Ok(Value::Array(selected.iter().map(|s| span_json(s.span)).collect()))
 }
 
 fn nearest_or_null(summary: Option<crate::store::Summary>) -> Value {
@@ -441,8 +369,8 @@ pub fn digest(corpus: &Corpus, scope: Option<&Value>) -> Result<Value, String> {
         let mut unfinished_count = 0;
         let mut slowest: Option<&Selected> = None;
         for s in &members {
-            if let Some(reason) = s.span.self_unknown.as_str() {
-                *reasons.entry(reason.to_string()).or_insert(0) += 1;
+            if let Some(reason) = &s.span.self_unknown {
+                *reasons.entry(reason.clone()).or_insert(0) += 1;
             }
             records.extend(error_records(&s.span));
             if s.span.unfinished {
@@ -461,7 +389,7 @@ pub fn digest(corpus: &Corpus, scope: Option<&Value>) -> Result<Value, String> {
             "self_unknown": reasons,
             "errors": error_summary(&records),
             "unfinished": unfinished_count,
-            "slowest": slowest.map(|s| pointer_of(&s.span)),
+            "slowest": slowest.map(|s| pointer_of(s.span)),
         }));
     }
     let errors: Vec<Value> = census_rows(&selected);
@@ -528,7 +456,7 @@ pub fn group(corpus: &Corpus, by: &[String], metrics: Option<&Value>, filt: Opti
         let mut key_values = Vec::new();
         let mut sort_key = Vec::new();
         for name in by {
-            let value = span_value(&s.span, &s.header, &s.env, name)?;
+            let value = span_value(&s.span, s.run, name)?;
             sort_key.push(py_str(&value));
             key_values.push(value);
         }
@@ -589,121 +517,84 @@ pub fn group(corpus: &Corpus, by: &[String], metrics: Option<&Value>, filt: Opti
 }
 
 pub fn tree(corpus: &Corpus, trace: &str) -> Result<Value, String> {
-    let err = |e: rusqlite::Error| e.to_string();
-    let conn = corpus.store.connection();
-    let run_rows: Vec<(i64, String, String, String, String, String)> = {
-        let mut stmt = conn.prepare(
-            "SELECT idx, path, tool, status, took, run FROM run WHERE trace = ?1 AND duplicate = 0 ORDER BY idx")
-            .map_err(err)?;
-        let out: Vec<(i64, String, String, String, String, String)> = stmt.query_map(params![trace], |row: &rusqlite::Row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?))
-        }).map_err(err)?.collect::<Result<Vec<_>, _>>().map_err(err)?;
-        out
-    };
-    let span_rows: Vec<(i64, String, String, String, i64)> = {
-        let mut stmt = conn.prepare(
-            "SELECT s.run_idx, s.span, s.parent_json, s.event, s.points FROM span s
-             JOIN run r ON r.idx = s.run_idx AND r.duplicate = 0 WHERE r.trace = ?1")
-            .map_err(err)?;
-        let out: Vec<(i64, String, String, String, i64)> = stmt.query_map(params![trace], |row: &rusqlite::Row| {
-            Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get::<_, String>(4).map(|t| t.len() as i64).unwrap_or(0)))
-        }).map_err(err)?.collect::<Result<Vec<_>, _>>().map_err(err)?;
-        out
-    };
-    let mut by_run: HashMap<String, (i64, String, String, String, Value)> = HashMap::new();
-    let mut idx_to_run: HashMap<i64, String> = HashMap::new();
-    for (idx, path, tool, status, took_json, run) in &run_rows {
-        let took: Value = serde_json::from_str(took_json).unwrap_or(Value::Null);
-        by_run.insert(run.clone(), (*idx, path.clone(), tool.clone(), status.clone(), took));
-        idx_to_run.insert(*idx, run.clone());
-    }
-    let mut run_spans: HashMap<String, Vec<(String, Option<String>, String)>> = HashMap::new();
-    for (idx, span, parent_json, event, _points) in &span_rows {
-        if let Some(run) = idx_to_run.get(idx) {
-            let parent: Option<String> = serde_json::from_str::<Value>(parent_json).ok()
-                .and_then(|v| v.as_str().map(|s| s.to_string()));
-            run_spans.entry(run.clone()).or_default().push((span.clone(), parent, event.clone()));
+    let mut run_order: Vec<usize> = Vec::new();
+    for (index, run) in corpus.runs.iter().enumerate() {
+        if run.trace == trace && !run.duplicate {
+            run_order.push(index);
         }
     }
-    let mut nodes: HashMap<String, Value> = HashMap::new();
-    for (idx, path, tool, status, took_json, run) in &run_rows {
-        let took: Value = serde_json::from_str(took_json).unwrap_or(Value::Null);
-        let spans = run_spans.get(run).cloned().unwrap_or_default();
-        let root_parent = spans.iter()
-            .find(|(_, _, event)| event == "run")
-            .and_then(|(_, parent, _)| parent.clone());
-        let unfinished_spans = {
-            let mut stmt = conn.prepare("SELECT COUNT(*) FROM span WHERE run_idx = ?1 AND unfinished = 1").map_err(err)?;
-            stmt.query_row(params![idx], |r: &rusqlite::Row| r.get::<_, i64>(0)).map_err(err)?
-        };
-        let points: i64 = {
-            let mut stmt = conn.prepare("SELECT points FROM span WHERE run_idx = ?1").map_err(err)?;
-            let texts = stmt.query_map(params![idx], |r: &rusqlite::Row| r.get::<_, String>(0)).map_err(err)?
-                .collect::<Result<Vec<_>, _>>().map_err(err)?;
-            let mut total = 0;
-            for text in texts {
-                let list: Vec<Value> = serde_json::from_str(&text).unwrap_or_default();
-                total += list.len() as i64;
-            }
-            total
-        };
-        nodes.insert(run.clone(), json!({
-            "run": run, "file": path, "tool": tool, "status": status,
-            "took_ms": took, "outcome": status,
+    let mut run_spans: HashMap<usize, Vec<(String, Option<String>)>> = HashMap::new();
+    for &idx in &run_order {
+        let mut list = Vec::new();
+        for &i in &corpus.spans_by_run[idx] {
+            let span = &corpus.spans[i];
+            list.push((span.span.clone(), span.parent.clone()));
+        }
+        run_spans.insert(idx, list);
+    }
+    let mut nodes: HashMap<usize, Value> = HashMap::new();
+    for &idx in &run_order {
+        let run = &corpus.runs[idx];
+        let root_parent = corpus.spans_by_run[idx].iter()
+            .map(|&i| &corpus.spans[i])
+            .find(|s| s.event == "run")
+            .and_then(|s| s.parent.clone());
+        let unfinished_spans = run.unfinished.values().sum::<i64>();
+        let points: i64 = corpus.spans_by_run[idx].iter()
+            .map(|&i| corpus.spans[i].points.len() as i64).sum();
+        nodes.insert(idx, json!({
+            "run": run.run, "file": run.path, "tool": run.tool,
+            "status": run.status, "took_ms": run.took, "outcome": run.status,
             "parent_span": root_parent.clone().map(Value::String).unwrap_or(Value::Null),
             "parent_run": Value::Null, "parent_outside_corpus": false,
-            "spans": spans.len(), "unfinished_spans": unfinished_spans,
-            "points": points,
-            "failed": *status == "error", "children": Vec::<Value>::new(),
+            "spans": run_spans.get(&idx).map(|s| s.len()).unwrap_or(0),
+            "unfinished_spans": unfinished_spans, "points": points,
+            "failed": run.status == "error", "children": Vec::<Value>::new(),
         }));
     }
-    let run_order: Vec<String> = run_rows.iter().map(|(.., run)| run.clone()).collect();
-    let owner_of = |parent_span: &str| -> Option<String> {
-        for run in &run_order {
-            if let Some(spans) = run_spans.get(run) {
-                if spans.iter().any(|(span, _, _)| span == parent_span) {
-                    return Some(run.clone());
+    let owner_of = |parent_span: &str| -> Option<usize> {
+        for &idx in &run_order {
+            if let Some(spans) = run_spans.get(&idx) {
+                if spans.iter().any(|(span, _)| span == parent_span) {
+                    return Some(idx);
                 }
             }
         }
         None
     };
-    let mut parent_link: HashMap<String, Option<String>> = HashMap::new();
-    let mut outside: HashMap<String, bool> = HashMap::new();
-    for run in &run_order {
-        let parent_span = nodes[run].get("parent_span").and_then(|v| v.as_str()).map(|s| s.to_string());
-        match parent_span.and_then(|p| owner_of(&p).map(|o| (p, o))) {
-            Some((p, owner)) => {
-                let _ = p;
-                parent_link.insert(run.clone(), Some(owner));
-            }
+    let mut parent_link: HashMap<usize, Option<usize>> = HashMap::new();
+    let mut outside: HashMap<usize, bool> = HashMap::new();
+    for &idx in &run_order {
+        let parent_span = nodes[&idx].get("parent_span").and_then(|v| v.as_str()).map(|s| s.to_string());
+        match parent_span.and_then(|p| owner_of(&p)) {
+            Some(owner) => { parent_link.insert(idx, Some(owner)); }
             None => {
-                if nodes[run].get("parent_span").map(|v| !v.is_null()).unwrap_or(false) {
-                    outside.insert(run.clone(), true);
+                if nodes[&idx].get("parent_span").map(|v| !v.is_null()).unwrap_or(false) {
+                    outside.insert(idx, true);
                 }
-                parent_link.insert(run.clone(), None);
+                parent_link.insert(idx, None);
             }
         }
     }
-    let mut children_of: HashMap<String, Vec<String>> = HashMap::new();
-    for run in &run_order {
-        if let Some(Some(owner)) = parent_link.get(run) {
-            children_of.entry(owner.clone()).or_default().push(run.clone());
+    let mut children_of: HashMap<usize, Vec<usize>> = HashMap::new();
+    for &idx in &run_order {
+        if let Some(Some(owner)) = parent_link.get(&idx) {
+            children_of.entry(*owner).or_default().push(idx);
         }
     }
-    fn build(run: &str, nodes: &HashMap<String, Value>,
-             parent_link: &HashMap<String, Option<String>>,
-             outside: &HashMap<String, bool>,
-             children_of: &HashMap<String, Vec<String>>) -> Value {
-        let mut node = nodes[run].clone();
-        if let Some(Some(owner)) = parent_link.get(run) {
-            node["parent_run"] = Value::String(owner.clone());
+    fn build(idx: usize, nodes: &HashMap<usize, Value>,
+             parent_link: &HashMap<usize, Option<usize>>,
+             outside: &HashMap<usize, bool>,
+             children_of: &HashMap<usize, Vec<usize>>) -> Value {
+        let mut node = nodes[&idx].clone();
+        if let Some(Some(owner)) = parent_link.get(&idx) {
+            node["parent_run"] = nodes[owner].get("run").cloned().unwrap_or(Value::Null);
         }
-        if outside.get(run).cloned().unwrap_or(false) {
+        if outside.get(&idx).cloned().unwrap_or(false) {
             node["parent_outside_corpus"] = json!(true);
         }
-        let mut children: Vec<Value> = children_of.get(run).cloned().unwrap_or_default()
-            .iter().map(|child| build(child, nodes, parent_link, outside, children_of)).collect();
+        let mut children: Vec<Value> = children_of.get(&idx).cloned().unwrap_or_default()
+            .iter().map(|child| build(*child, nodes, parent_link, outside, children_of)).collect();
         sort_by_took(&mut children);
         node["children"] = Value::Array(children);
         node
@@ -719,24 +610,23 @@ pub fn tree(corpus: &Corpus, trace: &str) -> Result<Value, String> {
         });
     }
     let mut roots: Vec<Value> = run_order.iter()
-        .filter(|run| parent_link.get(*run).map(|o| o.is_none()).unwrap_or(true))
-        .map(|run| build(run, &nodes, &parent_link, &outside, &children_of)).collect();
+        .filter(|idx| parent_link.get(*idx).map(|o| o.is_none()).unwrap_or(true))
+        .map(|idx| build(*idx, &nodes, &parent_link, &outside, &children_of)).collect();
     sort_by_took(&mut roots);
     let mut failed: Vec<Value> = run_order.iter()
-        .filter(|run| nodes[*run].get("failed").and_then(|v| v.as_bool()).unwrap_or(false))
-        .map(|run| Value::String(run.clone())).collect();
+        .filter(|idx| nodes[*idx].get("failed").and_then(|v| v.as_bool()).unwrap_or(false))
+        .map(|idx| Value::String(corpus.runs[*idx].run.clone())).collect();
     failed.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
-    let slowest: Option<String> = {
-        let mut best: Option<(String, f64)> = None;
-        for run in &run_order {
-            if let Some(took) = nodes[run].get("took_ms").and_then(|v| v.as_f64()) {
-                if best.as_ref().map(|(_, t)| took > *t).unwrap_or(true) {
-                    best = Some((run.clone(), took));
-                }
+    let mut slowest: Option<String> = None;
+    let mut slowest_took = f64::NEG_INFINITY;
+    for &idx in &run_order {
+        if let Some(took) = nodes[&idx].get("took_ms").and_then(|v| v.as_f64()) {
+            if slowest.is_none() || took > slowest_took {
+                slowest = Some(corpus.runs[idx].run.clone());
+                slowest_took = took;
             }
         }
-        best.map(|(run, _)| run)
-    };
+    }
     Ok(json!({ "coverage": coverage(corpus)?, "trace": trace,
                 "roots": roots, "failed": failed,
                 "slowest": slowest.map(Value::String).unwrap_or(Value::Null) }))
@@ -785,24 +675,14 @@ pub fn compare(a: &Corpus, b: &Corpus, filt: Option<&Value>) -> Result<Value, St
         for (tool, event) in &order {
             let members: Vec<&Selected> = selected.iter()
                 .filter(|s| &s.span.tool == tool && &s.span.event == event).collect();
-            let members_ref: Vec<&Selected> = members;
             events.push(json!({ "tool": tool, "event": event,
-                                "summary": side_summary(store, id, &members_ref)? }));
+                                "summary": side_summary(store, id, &members)? }));
         }
-        let runs: Vec<Value> = {
-            let err = |e: rusqlite::Error| e.to_string();
-            let conn = store.connection();
-            let mut stmt = conn.prepare(
-                "SELECT run, tool, status, took FROM run WHERE duplicate = 0 ORDER BY idx").map_err(err)?;
-            let out: Vec<Value> = stmt.query_map([], |row: &rusqlite::Row| {
-                Ok(json!({ "run": row.get::<_, String>(0)?,
-                           "tool": row.get::<_, String>(1)?,
-                           "outcome": row.get::<_, String>(2)?,
-                           "took_ms": parse_json(&row.get::<_, String>(3)?) }))
-            }).map_err(err)?.collect::<Result<Vec<_>, _>>().map_err(err)?;
-            out
-        };
-        store.clear_tmp().map_err(|e| e.to_string())?;
+        let runs: Vec<Value> = corpus.runs.iter().filter(|r| !r.duplicate).map(|run| {
+            json!({ "run": run.run, "tool": run.tool,
+                     "outcome": run.status, "took_ms": run.took })
+        }).collect();
+        store.clear_tmp().map_err(|e: io::Error| e.to_string())?;
         store.commit().map_err(|e: io::Error| e.to_string())?;
         Ok(json!({ "coverage": coverage(corpus)?, "runs": runs, "events": events }))
     }
@@ -853,8 +733,8 @@ pub fn overlap(corpus: &Corpus, window_event: &str, span_filter: Option<&Value>)
     let members = select_spans(corpus, span_filter)?;
     let mut windows: Vec<&Selected> = pairs.iter()
         .filter(|s| s.span.event == window_event && s.span.event != "run").collect();
-    windows.sort_by(|a, b| (a.span.start_t.clone(), a.span.start_seq.as_i64().unwrap_or(0))
-        .partial_cmp(&(b.span.start_t.clone(), b.span.start_seq.as_i64().unwrap_or(0)))
+    windows.sort_by(|a, b| (a.span.start_t.clone(), a.span.start_seq.as_u64().unwrap_or(0))
+        .partial_cmp(&(b.span.start_t.clone(), b.span.start_seq.as_u64().unwrap_or(0)))
         .unwrap_or(std::cmp::Ordering::Equal));
     let members: Vec<&Selected> = members.iter()
         .filter(|s| s.span.event != "run" && s.span.event != window_event).collect();
@@ -864,24 +744,23 @@ pub fn overlap(corpus: &Corpus, window_event: &str, span_filter: Option<&Value>)
         let mut record = serde_json::Map::new();
         record.insert("window".to_string(), pointer_of(&window.span));
         record.insert("start_t".to_string(), Value::String(window.span.start_t.clone()));
-        record.insert("end_t".to_string(), window.span.end_t.clone());
-        if window.span.end_t.is_null() {
+        record.insert("end_t".to_string(), window.span.end_t.clone().map(Value::String).unwrap_or(Value::Null));
+        if window.span.end_t.is_none() {
             unbounded.push(Value::Object(record));
             continue;
         }
         let start = crate::validate::parse_timestamp(&window.span.start_t).unwrap_or(0);
-        let end = window.span.end_t.as_str()
-            .and_then(crate::validate::parse_timestamp).unwrap_or(0);
+        let end = window.span.end_t.as_deref().and_then(crate::validate::parse_timestamp).unwrap_or(0);
         let mut hits: Vec<(bool, i64, String, Value)> = Vec::new();
         for other in &members {
             let other_start = crate::validate::parse_timestamp(&other.span.start_t).unwrap_or(0);
-            let covers = match other.span.end_t.as_str().and_then(crate::validate::parse_timestamp) {
+            let covers = match other.span.end_t.as_deref().and_then(crate::validate::parse_timestamp) {
                 Some(other_end) => other_start <= end && other_end >= start,
                 None => other_start <= end,
             };
             if covers {
                 let seq_none = other.span.start_seq.is_null();
-                let seq_num = other.span.start_seq.as_i64().unwrap_or(0);
+                let seq_num = other.span.start_seq.as_u64().unwrap_or(0) as i64;
                 let mut hit = serde_json::Map::new();
                 hit.insert("file".to_string(), Value::String(other.span.file.clone()));
                 hit.insert("start_seq".to_string(), other.span.start_seq.clone());
@@ -900,7 +779,7 @@ pub fn overlap(corpus: &Corpus, window_event: &str, span_filter: Option<&Value>)
     }
     unbounded.sort_by(|a, b| {
         let key = |v: &Value| (v["start_t"].as_str().unwrap_or("").to_string(),
-                               v["window"]["start_seq"].as_i64().unwrap_or(0));
+                               v["window"]["start_seq"].as_u64().unwrap_or(0));
         key(a).partial_cmp(&key(b)).unwrap_or(std::cmp::Ordering::Equal)
     });
     Ok(json!({ "coverage": coverage(corpus)?, "window_event": window_event,

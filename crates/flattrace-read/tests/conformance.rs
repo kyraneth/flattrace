@@ -92,9 +92,14 @@ fn normalize(value: &mut Value) {
         Value::Object(map) => {
             for (key, item) in map.iter_mut() {
                 if key == "file" {
-                    if let Some(path) = item.as_str() {
-                        let base = path.rsplit('/').next().unwrap_or(path);
-                        *item = Value::String(base.to_string());
+                    if let Some(path) = item.as_str().map(|s| s.to_string()) {
+                        let corpus = corpus_dir().to_string_lossy().into_owned();
+                        let prefix = format!("{corpus}/");
+                        // Absolute engine paths become corpus-relative like the
+                        // goldens; golden relative paths pass through untouched.
+                        if let Some(relative) = path.strip_prefix(&prefix) {
+                            *item = Value::String(relative.to_string());
+                        }
                     }
                 } else {
                     normalize(item);
@@ -278,4 +283,22 @@ fn overlap_matches_golden() {
         "overlap.json",
         flattrace_read::overlap(&files, "loop.stall", Some(r#"{"event": "tool.exec"}"#)).unwrap(),
     );
+}
+
+#[test]
+fn spans_runend_matches_golden() {
+    let file = corpus_dir().join("closedata").join("01.jsonl").to_string_lossy().into_owned();
+    let actual = flattrace_read::spans(&[file], None).unwrap();
+    let run = actual
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["event"] == "run")
+        .unwrap()
+        .clone();
+    assert_eq!(
+        run["end_data"],
+        serde_json::json!({ "turns": 3, "tokens": 42, "totals": { "took_ms": 40 } })
+    );
+    assert_golden("spans_runend.json", actual);
 }

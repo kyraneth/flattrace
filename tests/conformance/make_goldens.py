@@ -47,6 +47,9 @@ def write(name, payload):
 
 def main():
     files = corpus_files()
+    closedata = [str(CORPUS / "closedata" / "01.jsonl")]
+    for p in closedata:
+        assert Path(p).exists(), p
     write("check.json", reference.check(files))
     write("check_events.json",
           reference.check([str(CORPUS / "c01-parent.jsonl")],
@@ -76,6 +79,7 @@ def main():
                             [str(CORPUS / "c09-candidate.jsonl")]))
     write("overlap.json",
           reference.overlap(files, "loop.stall", {"event": "tool.exec"}))
+    write("spans_runend.json", reference.spans(closedata))
 
 
 if __name__ == "__main__":

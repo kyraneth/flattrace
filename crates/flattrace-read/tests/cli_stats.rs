@@ -318,4 +318,20 @@ fn cli_check_digest_tree_group_overlap() {
     assert_eq!(ok.status.code(), Some(0));
     let bad = Command::new(binary).arg("nope").output().expect("bad command");
     assert_eq!(bad.status.code(), Some(2));
+    let runend = Command::new(binary)
+        .arg("spans")
+        .arg(dir.join("closedata").join("01.jsonl"))
+        .current_dir(&dir)
+        .output()
+        .expect("flattrace-read spans run-end data");
+    assert_eq!(runend.status.code(), Some(0));
+    let parsed: Value = serde_json::from_slice(&runend.stdout).unwrap();
+    let run = parsed
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["event"] == "run")
+        .unwrap()
+        .clone();
+    assert_eq!(run["end_data"]["turns"], Value::from(3));
 }

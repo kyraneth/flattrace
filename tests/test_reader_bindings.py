@@ -6,6 +6,7 @@ import json
 import os
 import sys
 import unittest
+from pathlib import Path
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CORPUS = os.path.join(HERE, "conformance", "corpus")
@@ -112,6 +113,14 @@ class ReaderBindingTests(unittest.TestCase):
             "overlap.json",
             self.reader.overlap(corpus_files(), "loop.stall", {"event": "tool.exec"}))
 
+    def test_spans_runend(self):
+        rooted = [os.path.join(CORPUS, "closedata", "01.jsonl")]
+        rows = self.reader.spans(rooted)
+        self.check_golden("spans_runend.json", rows)
+        run = next(r for r in rows if r["event"] == "run")
+        self.assertEqual(run["end_data"],
+                         {"turns": 3, "tokens": 42, "totals": {"took_ms": 40}})
+
     @needs_engine
     def test_matches_reference_float_policy(self):
         digest = self.reader.digest(corpus_files())
@@ -159,8 +168,15 @@ def _normalize(value):
 
 def _rel(value):
     if isinstance(value, dict):
-        return {k: _rel(v) if k != "file" else os.path.basename(v)
-                for k, v in value.items()}
+        out = {}
+        for k, v in value.items():
+            if k == "file" and isinstance(v, str) and os.path.isabs(v):
+                try:
+                    v = str(Path(v).relative_to(CORPUS))
+                except ValueError:
+                    pass
+            out[k] = _rel(v)
+        return out
     if isinstance(value, list):
         return [_rel(v) for v in value]
     return value

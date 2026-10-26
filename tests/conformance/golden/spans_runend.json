@@ -1,0 +1,99 @@
+[
+  {
+    "children": [
+      "2222222222222222"
+    ],
+    "data": {
+      "argv": [
+        "synthetic"
+      ],
+      "host": "synthetic",
+      "task": "synthetic-task",
+      "variant": "baseline",
+      "version": "1"
+    },
+    "depth": 0,
+    "end_data": {
+      "tokens": 42,
+      "totals": {
+        "took_ms": 40
+      },
+      "turns": 3
+    },
+    "end_seq": 5,
+    "end_t": "2026-10-20T00:00:08.040Z",
+    "error": null,
+    "event": "run",
+    "file": "closedata/01.jsonl",
+    "outcome": "ok",
+    "parent": null,
+    "points": [],
+    "run": "closedata",
+    "self_ms": 25.0,
+    "self_unknown": null,
+    "span": "1111111111111111",
+    "start_seq": 0,
+    "start_t": "2026-10-20T00:00:08.000Z",
+    "took_ms": 40,
+    "tool": "tool",
+    "tool_version": "1",
+    "trace": "abababababababababababababababab",
+    "unfinished": false
+  },
+  {
+    "children": [
+      "3333333333333333"
+    ],
+    "data": {
+      "model": "synthetic-model"
+    },
+    "depth": 1,
+    "end_data": {},
+    "end_seq": 4,
+    "end_t": "2026-10-20T00:00:08.016Z",
+    "error": null,
+    "event": "agent.turn",
+    "file": "closedata/01.jsonl",
+    "outcome": "ok",
+    "parent": "1111111111111111",
+    "points": [],
+    "run": "closedata",
+    "self_ms": 3.0,
+    "self_unknown": null,
+    "span": "2222222222222222",
+    "start_seq": 1,
+    "start_t": "2026-10-20T00:00:08.001Z",
+    "took_ms": 15,
+    "tool": "tool",
+    "tool_version": "1",
+    "trace": "abababababababababababababababab",
+    "unfinished": false
+  },
+  {
+    "children": [],
+    "data": {
+      "shot": "sh009"
+    },
+    "depth": 2,
+    "end_data": {},
+    "end_seq": 3,
+    "end_t": "2026-10-20T00:00:08.014Z",
+    "error": null,
+    "event": "tool.exec",
+    "file": "closedata/01.jsonl",
+    "outcome": "ok",
+    "parent": "2222222222222222",
+    "points": [],
+    "run": "closedata",
+    "self_ms": 12.0,
+    "self_unknown": null,
+    "span": "3333333333333333",
+    "start_seq": 2,
+    "start_t": "2026-10-20T00:00:08.002Z",
+    "took_ms": 12,
+    "tool": "tool",
+    "tool_version": "1",
+    "trace": "abababababababababababababababab",
+    "unfinished": false
+  }
+]

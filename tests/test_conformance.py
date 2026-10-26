@@ -108,6 +108,15 @@ class ConformanceTests(unittest.TestCase):
             reference.overlap([os.path.basename(p) for p in corpus_files()],
                               "loop.stall", {"event": "tool.exec"}))
 
+    def test_spans_runend(self):
+        rooted = [os.path.join("closedata", "01.jsonl")]
+        rows = reference.spans(rooted)
+        self.check_golden("spans_runend.json", rows)
+        run = next(r for r in rows if r["event"] == "run")
+        self.assertEqual(run["end_data"],
+                         {"turns": 3, "tokens": 42, "totals": {"took_ms": 40}})
+        self.assertEqual(run["children"], ["2222222222222222"])
+
     def test_real_samples_shape(self):
         real = sorted(str(p) for p in (CORPUS / "real").glob("*.jsonl"))
         self.assertEqual([os.path.basename(p) for p in real],
