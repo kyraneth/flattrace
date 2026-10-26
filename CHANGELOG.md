@@ -18,6 +18,8 @@
 - Writer run-end data: `close(data=...)` / `finish_with` carry an optional
   run-end payload (e.g. run totals), normalized like any other payload;
   omitted means `{}`. Rust writer crate bumped to 0.2.0.
+- Writer `end()` returns the `took_ms` written on the end line (Python and
+  TypeScript; Rust keeps `end()` and adds `end_timed()`). Backward compatible.
 
 ## 0.1.0
 
