@@ -32,6 +32,15 @@ class TraceTests(unittest.TestCase):
         return subprocess.run([sys.executable, "-m", "flattrace", *map(str, args)],
                               cwd=ROOT, capture_output=True, text=True)
 
+    def test_end_returns_written_took_ms(self):
+        writer = Writer(self.path, "agent", "dev")
+        span = writer.start("tool")
+        took = writer.end(span, "ok")
+        writer.close("ok")
+        rows, issues = read_trace(self.path)
+        self.assertFalse(issues)
+        self.assertEqual(rows[2]["took_ms"], took)
+
     def test_close_carries_run_end_data(self):
         writer = Writer(self.path, "agent", "dev")
         writer.close("ok", {"turns": 3, "tokens": None, "ratio": float("nan")})

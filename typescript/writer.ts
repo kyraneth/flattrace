@@ -247,21 +247,24 @@ export class Writer {
     }
     return { error };
   }
-  end(span: string, outcome: string, data: Data = {}, error?: TraceError): void {
+  // Returns the took_ms written on the end line (undefined when a best-effort root end is refused).
+  end(span: string, outcome: string, data: Data = {}, error?: TraceError): number | undefined {
     if (span === this.root) {
       const message = 'run root can only end through close()';
       if (!this.bestEffort) throw new Error(message);
       warn(message, false);
-      return;
+      return undefined;
     }
-    this.endSpan(span, outcome, data, error);
+    return this.endSpan(span, outcome, data, error);
   }
-  private endSpan(span: string, outcome: string, data: Data = {}, error?: TraceError): void {
+  private endSpan(span: string, outcome: string, data: Data = {}, error?: TraceError): number {
     const entry = this.entry(span);
     if (typeof outcome !== 'string') throw new TypeError('outcome must be a string');
+    const took_ms = performance.now() - entry.begun;
     this.emit(entry.event, 'end', span, entry.parent, data,
-      { took_ms: performance.now() - entry.begun, outcome, ...this.errorData(error) });
+      { took_ms, outcome, ...this.errorData(error) });
     this.active.delete(span);
+    return took_ms;
   }
   traceparent(span = this.root): string {
     this.entry(span);

@@ -45,6 +45,17 @@ test('writer flushes, pairs spans, errors and learning data pass the common chec
   assert.throws(() => new Writer(path, 'test', '1'), /EEXIST/);
 });
 
+test('end returns the took_ms written on the end line', t => {
+  const path = join(fixture(t), 'took.jsonl');
+  const w = new Writer(path, 'agent', 'dev');
+  const span = w.start('tool');
+  const took = w.end(span, 'ok');
+  w.close('ok');
+  const rows = readFileSync(path, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(typeof took, 'number');
+  assert.equal(rows[2].took_ms, took);
+});
+
 test('close carries a normalized run-end payload', t => {
   const path = join(fixture(t), 'close.jsonl');
   const w = new Writer(path, 'agent', 'dev');
