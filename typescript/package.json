@@ -30,20 +30,36 @@
     ".": {
       "types": "./dist/writer.d.ts",
       "import": "./dist/writer.js"
+    },
+    "./reader": {
+      "types": "./dist/reader.d.ts",
+      "import": "./dist/reader.js"
     }
   },
   "files": [
     "dist/writer.js",
     "dist/writer.d.ts",
+    "dist/reader.js",
+    "dist/reader.d.ts",
+    "native/*.node",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json && node build-docs.mjs",
+    "build-reader": "npx napi build --platform --release --no-js --manifest-path ../crates/flattrace-napi/Cargo.toml --output-dir ./native",
     "prepack": "npm run build",
     "test": "node --test test/*.test.mjs"
   },
+  "napi": {
+    "binaryName": "flattrace-reader",
+    "targets": [
+      "x86_64-unknown-linux-gnu",
+      "aarch64-apple-darwin"
+    ]
+  },
   "devDependencies": {
+    "@napi-rs/cli": "3.10.9",
     "@types/node": "^26.6.5",
     "typescript": "^7.0.2"
   }

@@ -1,5 +1,6 @@
 __pycache__/
 *.pyc
+flattrace/_flattrace_read*.so
 /target/
 /crates/*/target/
 /.venv/
@@ -8,6 +9,7 @@ __pycache__/
 /*.egg-info/
 /typescript/node_modules/
 /typescript/dist/
+/typescript/native/
 /typescript/README.md
 /typescript/LICENSE
 /typescript/*.tgz

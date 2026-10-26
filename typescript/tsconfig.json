@@ -11,6 +11,7 @@
     ]
   },
   "include": [
-    "writer.ts"
+    "writer.ts",
+    "reader.ts"
   ]
 }

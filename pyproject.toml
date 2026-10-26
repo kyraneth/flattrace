@@ -1,6 +1,6 @@
 [build-system]
-requires = ["uv_build==0.9.27"]
-build-backend = "uv_build"
+requires = ["maturin==1.15.0"]
+build-backend = "maturin"
 
 [project]
 name = "flattrace"
@@ -27,6 +27,13 @@ Issues = "https://github.com/kyraneth/flattrace/issues"
 [project.scripts]
 flattrace = "flattrace.__main__:main"
 
-[tool.uv.build-backend]
-module-root = ""
-module-name = "flattrace"
+[tool.maturin]
+# The compiled reader engine lives inside the pure package; the pure
+# modules (writer, check, export, stats) never import it. abi3-py310 is
+# enabled on the pyo3 dependency in crates/flattrace-py/Cargo.toml, so
+# maturin emits one abi3 wheel per platform plus no sdist.
+module-name = "flattrace._flattrace_read"
+bindings = "pyo3"
+manifest-path = "crates/flattrace-py/Cargo.toml"
+python-source = "."
+strip = true
