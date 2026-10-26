@@ -16,14 +16,24 @@ on:
           - build
           - pypi
           - npm
-      expected_wheel_sha256:
+          - cli
+      expected_abi3_linux_sha256:
         description: Required for pypi; lowercase SHA-256 from the reviewed build
         type: string
-      expected_sdist_sha256:
+      expected_abi3_macos_sha256:
+        description: Required for pypi; lowercase SHA-256 from the reviewed build
+        type: string
+      expected_pure_sha256:
         description: Required for pypi; lowercase SHA-256 from the reviewed build
         type: string
       expected_tgz_sha256:
         description: Required for npm; lowercase SHA-256 from the reviewed build
+        type: string
+      expected_cli_linux_sha256:
+        description: Required for cli; lowercase SHA-256 from the reviewed build
+        type: string
+      expected_cli_macos_sha256:
+        description: Required for cli; lowercase SHA-256 from the reviewed build
         type: string
 
 permissions: {}
@@ -37,8 +47,207 @@ env:
   TZ: UTC
 
 jobs:
-  build:
+  wheels-abi3-linux:
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check out selected tag or commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Build abi3 Linux wheel in manylinux2014
+        run: |
+          umask 002
+          # manylinux2014 glibc floor via an explicit container; the checkout
+          # stays on the host so no in-container Node is needed. abi3 wheels
+          # do not link the building interpreter; cp311 only runs maturin.
+          docker run --rm -v "$PWD:/io" -w /io quay.io/pypa/manylinux2014_x86_64 \
+            bash -lc 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.94.1 && export PATH="$HOME/.cargo/bin:$PATH" && /opt/python/cp311-cp311/bin/python -m pip install --no-cache-dir "maturin==1.15.0" && /opt/python/cp311-cp311/bin/python -m maturin build --release --compatibility manylinux2014 --out dist/abi3'
+          ls dist/abi3/*.whl | tee "$RUNNER_TEMP/abi3-linux.txt"
+          test "$(wc -l < "$RUNNER_TEMP/abi3-linux.txt")" = 1
+
+      - name: Upload abi3 Linux wheel
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d2292f3646cd9 # v7.0.2
+        with:
+          name: abi3-linux
+          path: dist/abi3/*.whl
+          if-no-files-found: error
+
+  wheels-abi3-macos:
+    runs-on: macos-14
+    permissions:
+      contents: read
+    steps:
+      - name: Check out selected tag or commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.13.11'
+
+      - name: Verify pinned Rust and install pinned maturin
+        run: |
+          umask 002
+          rustup toolchain install 1.94.1 --profile minimal
+          python -m pip install --no-cache-dir "maturin==1.15.0"
+
+      - name: Build abi3 macOS wheel
+        run: |
+          umask 002
+          python -m maturin build --release --out dist/abi3
+          ls dist/abi3/*.whl | tee "$RUNNER_TEMP/abi3-macos.txt"
+          test "$(wc -l < "$RUNNER_TEMP/abi3-macos.txt")" = 1
+
+      - name: Upload abi3 macOS wheel
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d2292f3646cd9 # v7.0.2
+        with:
+          name: abi3-macos
+          path: dist/abi3/*.whl
+          if-no-files-found: error
+
+  node-linux:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check out selected tag or commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.18.0'
+          package-manager-cache: false
+
+      - name: Verify bundled npm and install pinned Rust
+        run: |
+          umask 002
+          # Node v24.18.0 bundles npm 11.16.0; only the lockfile-pinned CLI is installed.
+          [[ "$(npm --version)" == '11.16.0' ]]
+          rustup toolchain install 1.94.1 --profile minimal
+
+      - name: Build linux-x64-gnu binding
+        env:
+          CARGO_NET_RETRY: '3'
+        run: |
+          umask 002
+          npm --prefix typescript ci --ignore-scripts
+          npm --prefix typescript run build-reader
+          ls typescript/native/flattrace-reader.linux-x64-gnu.node
+
+      - name: Upload linux-x64-gnu binding
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d2292f3646cd9 # v7.0.2
+        with:
+          name: node-linux
+          path: typescript/native/flattrace-reader.linux-x64-gnu.node
+          if-no-files-found: error
+
+  node-macos:
+    runs-on: macos-14
+    permissions:
+      contents: read
+    steps:
+      - name: Check out selected tag or commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Set up Node
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '24.18.0'
+          package-manager-cache: false
+
+      - name: Verify bundled npm and install pinned Rust
+        run: |
+          umask 002
+          [[ "$(npm --version)" == '11.16.0' ]]
+          rustup toolchain install 1.94.1 --profile minimal
+
+      - name: Build darwin-arm64 binding
+        env:
+          CARGO_NET_RETRY: '3'
+        run: |
+          umask 002
+          npm --prefix typescript ci --ignore-scripts
+          npm --prefix typescript run build-reader
+          ls typescript/native/flattrace-reader.darwin-arm64.node
+
+      - name: Upload darwin-arm64 binding
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d2292f3646cd9 # v7.0.2
+        with:
+          name: node-macos
+          path: typescript/native/flattrace-reader.darwin-arm64.node
+          if-no-files-found: error
+
+  cli-linux:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - name: Check out selected tag or commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Verify pinned Rust and build the CLI binary
+        run: |
+          umask 002
+          rustup toolchain install 1.94.1 --profile minimal
+          cargo +1.94.1 build --release --locked --manifest-path crates/flattrace-read/Cargo.toml --bin flattrace-read
+          mkdir -p dist/cli
+          cp target/release/flattrace-read dist/cli/flattrace-read-linux-x64
+          ./dist/cli/flattrace-read-linux-x64 --help
+
+      - name: Upload linux-x64 CLI binary
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d2292f3646cd9 # v7.0.2
+        with:
+          name: cli-linux
+          path: dist/cli/flattrace-read-linux-x64
+          if-no-files-found: error
+
+  cli-macos:
+    runs-on: macos-14
+    permissions:
+      contents: read
+    steps:
+      - name: Check out selected tag or commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+
+      - name: Verify pinned Rust and build the CLI binary
+        run: |
+          umask 002
+          rustup toolchain install 1.94.1 --profile minimal
+          cargo +1.94.1 build --release --locked --manifest-path crates/flattrace-read/Cargo.toml --bin flattrace-read
+          mkdir -p dist/cli
+          cp target/release/flattrace-read dist/cli/flattrace-read-darwin-arm64
+          ./dist/cli/flattrace-read-darwin-arm64 --help
+
+      - name: Upload darwin-arm64 CLI binary
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d2292f3646cd9 # v7.0.2
+        with:
+          name: cli-macos
+          path: dist/cli/flattrace-read-darwin-arm64
+          if-no-files-found: error
+
+  assemble:
+    runs-on: ubuntu-24.04
+    needs: [wheels-abi3-linux, wheels-abi3-macos, node-linux, node-macos, cli-linux, cli-macos]
     permissions:
       contents: read
     outputs:
@@ -49,12 +258,19 @@ jobs:
         env:
           RELEASE_REF: ${{ inputs.ref }}
           RELEASE_TARGET: ${{ inputs.target }}
-          EXPECTED_WHEEL: ${{ inputs.expected_wheel_sha256 }}
-          EXPECTED_SDIST: ${{ inputs.expected_sdist_sha256 }}
+          EXPECTED_ABI3_LINUX: ${{ inputs.expected_abi3_linux_sha256 }}
+          EXPECTED_ABI3_MACOS: ${{ inputs.expected_abi3_macos_sha256 }}
+          EXPECTED_PURE: ${{ inputs.expected_pure_sha256 }}
           EXPECTED_TGZ: ${{ inputs.expected_tgz_sha256 }}
+          EXPECTED_CLI_LINUX: ${{ inputs.expected_cli_linux_sha256 }}
+          EXPECTED_CLI_MACOS: ${{ inputs.expected_cli_macos_sha256 }}
         run: |
           umask 002
           if [[ "$RELEASE_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            if [[ "$RELEASE_TARGET" == cli ]]; then
+              echo "cli publishes to a GitHub release and needs a tag, not a SHA" >&2
+              exit 1
+            fi
             printf 'ref=%s\n' "$RELEASE_REF" >> "$GITHUB_OUTPUT"
           else
             git check-ref-format "refs/tags/$RELEASE_REF"
@@ -63,10 +279,15 @@ jobs:
           case "$RELEASE_TARGET" in
             build) ;;
             pypi)
-              [[ "$EXPECTED_WHEEL" =~ ^[0-9a-f]{64}$ ]]
-              [[ "$EXPECTED_SDIST" =~ ^[0-9a-f]{64}$ ]]
+              [[ "$EXPECTED_ABI3_LINUX" =~ ^[0-9a-f]{64}$ ]]
+              [[ "$EXPECTED_ABI3_MACOS" =~ ^[0-9a-f]{64}$ ]]
+              [[ "$EXPECTED_PURE" =~ ^[0-9a-f]{64}$ ]]
               ;;
             npm) [[ "$EXPECTED_TGZ" =~ ^[0-9a-f]{64}$ ]] ;;
+            cli)
+              [[ "$EXPECTED_CLI_LINUX" =~ ^[0-9a-f]{64}$ ]]
+              [[ "$EXPECTED_CLI_MACOS" =~ ^[0-9a-f]{64}$ ]]
+              ;;
             *) exit 1 ;;
           esac
 
@@ -107,42 +328,70 @@ jobs:
           node-version: '24.18.0'
           package-manager-cache: false
 
-      - name: Verify bundled npm and install pinned Rust
+      - name: Verify bundled npm and install pinned Rust and maturin
         run: |
           umask 002
-          # Node v24.18.0 bundles npm 11.16.0; no ad-hoc package install.
+          # Node v24.18.0 bundles npm 11.16.0; only the lockfile-pinned CLI is installed.
           [[ "$(npm --version)" == '11.16.0' ]]
           rustup toolchain install 1.94.1 --profile minimal
+          python -m pip install --no-cache-dir "maturin==1.15.0"
 
       - name: Run all test suites
         run: |
           umask 002
+          python -m maturin develop --release --manifest-path crates/flattrace-py/Cargo.toml
           python -m unittest -v
           python -m unittest discover -s bench -p 'test_*.py' -v
           cargo +1.94.1 test --manifest-path crates/flattrace/Cargo.toml --locked
+          cargo +1.94.1 test --manifest-path crates/flattrace-read/Cargo.toml --locked
           cargo +1.94.1 test --manifest-path bench/rust/Cargo.toml --locked
           npm --prefix typescript ci --ignore-scripts
+          mkdir -p typescript/native
+          cp "$RUNNER_TEMP/node-linux/flattrace-reader.linux-x64-gnu.node" typescript/native/
           npm --prefix typescript test
 
-      - name: Build Python and npm distributions
+      - name: Collect built artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd43ac5ef33c # v8.0.2
+        with:
+          path: collected
+          merge-multiple: false
+
+      - name: Build pure fallback wheel and npm tarball
         run: |
           umask 002
-          # uv_build is exactly pinned in pyproject.toml. Its native archive
-          # writer normalizes ownership and timestamps without post-processing.
+          mkdir -p dist/python dist/npm dist/cli
+          cp collected/abi3-linux/*.whl dist/python/
+          cp collected/abi3-macos/*.whl dist/python/
+          cp collected/cli-linux/flattrace-read-linux-x64 dist/cli/
+          cp collected/cli-macos/flattrace-read-darwin-arm64 dist/cli/
+          cp collected/node-linux/flattrace-reader.linux-x64-gnu.node \
+             collected/node-macos/flattrace-reader.darwin-arm64.node typescript/native/
+          # The pure py3-none-any fallback ships the same sources with the
+          # pinned uv build backend instead of maturin, so installing it never
+          # needs a Rust toolchain; the reader functions raise EngineUnavailable.
           python - <<'PY'
-          import tomllib
           from pathlib import Path
-          config = tomllib.loads(Path('pyproject.toml').read_text())
-          assert config['build-system'] == {
-              'requires': ['uv_build==0.9.27'], 'build-backend': 'uv_build'
-          }, 'Select a release commit with the reproducible build configuration'
+          text = Path('pyproject.toml').read_text()
+          text = text.replace('requires = ["maturin==1.15.0"]\nbuild-backend = "maturin"',
+                              'requires = ["uv_build==0.9.27"]\nbuild-backend = "uv_build"')
+          out, skipping = [], False
+          for line in text.splitlines(keepends=True):
+              if line.startswith('['):
+                  skipping = line.strip() == '[tool.maturin]'
+                  if skipping:
+                      continue
+              if not skipping:
+                  out.append(line)
+          out.append('\n[tool.uv.build-backend]\nmodule-root = ""\nmodule-name = "flattrace"\n')
+          Path('pyproject.toml').write_text(''.join(out))
           PY
           uv build --python 3.13.11 --no-sources --out-dir dist/python
+          git checkout -- pyproject.toml
           npm --prefix typescript run build
           mkdir -p dist/npm
           (cd typescript && npm pack --ignore-scripts --pack-destination ../dist/npm)
           cp "$RUNNER_TEMP/source-commit.txt" dist/source-commit.txt
-          (cd dist && sha256sum python/*.whl python/*.tar.gz npm/*.tgz | tee SHA256SUMS)
+          (cd dist && sha256sum python/*.whl npm/*.tgz cli/* | tee SHA256SUMS)
           {
             echo '## Release build'
             echo
@@ -154,14 +403,14 @@ jobs:
 
       - name: Upload immutable build artifacts
         id: upload
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d2292f3646cd9 # v7.0.2
         with:
           name: release-distributions
           path: dist/
           if-no-files-found: error
 
   publish-pypi:
-    needs: build
+    needs: assemble
     if: inputs.target == 'pypi'
     runs-on: ubuntu-24.04
     environment: pypi
@@ -169,26 +418,31 @@ jobs:
       id-token: write
     steps:
       - name: Download this build's immutable artifacts
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd43ac5ef33c # v8.0.2
         with:
-          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          artifact-ids: ${{ needs.assemble.outputs.artifact-id }}
           path: dist
           merge-multiple: true
 
       - name: Verify approved Python bytes before OIDC or upload
         env:
-          EXPECTED_WHEEL: ${{ inputs.expected_wheel_sha256 }}
-          EXPECTED_SDIST: ${{ inputs.expected_sdist_sha256 }}
+          EXPECTED_ABI3_LINUX: ${{ inputs.expected_abi3_linux_sha256 }}
+          EXPECTED_ABI3_MACOS: ${{ inputs.expected_abi3_macos_sha256 }}
+          EXPECTED_PURE: ${{ inputs.expected_pure_sha256 }}
         run: |
           umask 002
-          [[ "$EXPECTED_WHEEL" =~ ^[0-9a-f]{64}$ ]]
-          [[ "$EXPECTED_SDIST" =~ ^[0-9a-f]{64}$ ]]
-          wheels=(dist/python/*.whl)
-          sdists=(dist/python/*.tar.gz)
-          [[ ${#wheels[@]} == 1 && -f "${wheels[0]}" ]]
-          [[ ${#sdists[@]} == 1 && -f "${sdists[0]}" ]]
-          printf '%s  %s\n' "$EXPECTED_WHEEL" "${wheels[0]}" | sha256sum --check --strict -
-          printf '%s  %s\n' "$EXPECTED_SDIST" "${sdists[0]}" | sha256sum --check --strict -
+          [[ "$EXPECTED_ABI3_LINUX" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$EXPECTED_ABI3_MACOS" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$EXPECTED_PURE" =~ ^[0-9a-f]{64}$ ]]
+          abi3_linux=(dist/python/*manylinux*.whl)
+          abi3_macos=(dist/python/*macosx*.whl)
+          pure=(dist/python/*py3-none-any.whl)
+          [[ ${#abi3_linux[@]} == 1 && -f "${abi3_linux[0]}" ]]
+          [[ ${#abi3_macos[@]} == 1 && -f "${abi3_macos[0]}" ]]
+          [[ ${#pure[@]} == 1 && -f "${pure[0]}" ]]
+          printf '%s  %s\n' "$EXPECTED_ABI3_LINUX" "${abi3_linux[0]}" | sha256sum --check --strict -
+          printf '%s  %s\n' "$EXPECTED_ABI3_MACOS" "${abi3_macos[0]}" | sha256sum --check --strict -
+          printf '%s  %s\n' "$EXPECTED_PURE" "${pure[0]}" | sha256sum --check --strict -
 
       - name: Set up uv
         uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
@@ -196,13 +450,13 @@ jobs:
           version: '0.9.27'
           enable-cache: false
 
-      - name: Publish exact approved Python files with PyPI trusted publishing
+      - name: Publish exact approved wheels with PyPI trusted publishing
         run: |
           umask 002
-          uv publish --trusted-publishing always dist/python/*.whl dist/python/*.tar.gz
+          uv publish --trusted-publishing always dist/python/*.whl
 
   publish-npm:
-    needs: build
+    needs: assemble
     if: inputs.target == 'npm'
     runs-on: ubuntu-24.04
     environment: npm
@@ -211,9 +465,9 @@ jobs:
       contents: read
     steps:
       - name: Download this build's immutable artifacts
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd43ac5ef33c # v8.0.2
         with:
-          artifact-ids: ${{ needs.build.outputs.artifact-id }}
+          artifact-ids: ${{ needs.assemble.outputs.artifact-id }}
           path: dist
           merge-multiple: true
 
@@ -246,3 +500,41 @@ jobs:
         run: |
           umask 002
           npm publish dist/npm/*.tgz --provenance --access public
+
+  publish-cli:
+    needs: assemble
+    if: inputs.target == 'cli'
+    runs-on: ubuntu-24.04
+    environment: cli
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Download this build's immutable artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd43ac5ef33c # v8.0.2
+        with:
+          artifact-ids: ${{ needs.assemble.outputs.artifact-id }}
+          path: dist
+          merge-multiple: true
+
+      - name: Verify approved CLI bytes before upload
+        env:
+          EXPECTED_CLI_LINUX: ${{ inputs.expected_cli_linux_sha256 }}
+          EXPECTED_CLI_MACOS: ${{ inputs.expected_cli_macos_sha256 }}
+          RELEASE_REF: ${{ inputs.ref }}
+        run: |
+          umask 002
+          [[ "$EXPECTED_CLI_LINUX" =~ ^[0-9a-f]{64}$ ]]
+          [[ "$EXPECTED_CLI_MACOS" =~ ^[0-9a-f]{64}$ ]]
+          printf '%s  %s\n' "$EXPECTED_CLI_LINUX" dist/cli/flattrace-read-linux-x64 | sha256sum --check --strict -
+          printf '%s  %s\n' "$EXPECTED_CLI_MACOS" dist/cli/flattrace-read-darwin-arm64 | sha256sum --check --strict -
+          # The cli target publishes to the tag's GitHub release as built binaries.
+          git check-ref-format "refs/tags/$RELEASE_REF"
+
+      - name: Upload exact approved binaries to the tag release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_REF: ${{ inputs.ref }}
+        run: |
+          umask 002
+          gh release upload "$RELEASE_REF" dist/cli/flattrace-read-linux-x64 dist/cli/flattrace-read-darwin-arm64 --clobber=false

@@ -11,14 +11,21 @@
 ## Install
 
 ```sh
-pip install flattrace                 # Python writer + flattrace CLI
+pip install flattrace                 # Python writer + flattrace CLI (+ reader engine on supported platforms)
 cargo add flattrace serde_json        # Rust writer (Linux)
-npm install flattrace                 # Node writer + TypeScript declarations
+npm install flattrace                 # Node writer + TypeScript declarations (+ reader engine where bundled)
 ```
 
 Packages: [PyPI](https://pypi.org/project/flattrace/),
 [crates.io](https://crates.io/crates/flattrace) and
-[npm](https://www.npmjs.com/package/flattrace). To work from a checkout instead:
+[npm](https://www.npmjs.com/package/flattrace). The 0.2.0 PyPI release ships
+`cp310-abi3` wheels (manylinux2014 x86_64, macOS arm64) carrying the compiled
+reader engine, plus a pure `py3-none-any` fallback where the writer and
+check/export/stats keep working and the new `flattrace.reader` functions
+raise `EngineUnavailable`. The npm package keeps the writer as its default
+export and ships both native bindings; `flattrace/reader` loads the running
+platform's binary and throws `EngineUnavailable` elsewhere. To work from a
+checkout instead:
 `python3 -m pip install .`; `flattrace = { path = "../flattrace/crates/flattrace" }`
 in Cargo.toml; or `npm --prefix typescript install && npm --prefix typescript run build`
 then `npm install ./typescript`. Rust also needs `serde_json`.
@@ -131,6 +138,39 @@ Exit 0 means valid, complete evidence; 1 means validation issues or unfinished
 work; 2 means invocation or I/O failure. Missing ends stay unfinished. Inclusive
 nested durations must not be added as elapsed time; `self_ms` is unknown when
 local overlap or incomplete evidence prevents safe attribution.
+
+## Read at scale
+
+The Rust reader engine (`crates/flattrace-read`) replays the corpus once,
+spills span records and exact-quantile samples to a temporary SQLite file and
+answers a frozen function set documented in [docs/reader.md](docs/reader.md):
+`check`, `spans` (paired rows with filters), `digest` (compact table, error
+census, exact pointers, coverage statement), `group`, `tree` (traceparent
+across processes), `compare` and `overlap` (stall windows vs spans). Filters
+cover time windows, trace/run, event/tool names, agent, model, outcome,
+session ID and arbitrary payload field paths. Unknown never becomes 0;
+unfinished stays unfinished; durations come only from `took_ms`.
+
+```sh
+cargo run --manifest-path crates/flattrace-read/Cargo.toml -- check TRACE.jsonl
+flattrace-read stats traces/ --json
+flattrace-read digest traces/ --filter '{"event": "tool.call"}'
+```
+
+```python
+from flattrace import reader
+table = reader.digest(["traces/"])  # EngineUnavailable without the abi3 wheel
+```
+
+```js
+import { digest } from 'flattrace/reader';
+const table = digest(['traces/']); // EngineUnavailable on unsupported platforms
+```
+
+The engine and its Python/Node bindings assert the same golden outputs as
+the frozen conformance corpus (`tests/conformance/`); see
+[bench/READER.md](bench/READER.md) for the measured comparison with
+`flattrace stats`.
 
 ## Instrument a real tool
 

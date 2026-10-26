@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.0 (unreleased)
+
+- Rust reader engine (`flattrace-read` crate plus `flattrace-read` CLI):
+  streaming check at parity with `flattrace check`, streaming `stats` parity,
+  span pairing, disk-spilled exact quantiles and the frozen digest/spans/group/
+  tree/compare/overlap query surface over plain and gzip JSONL.
+- Python (`flattrace.reader`) and Node (`flattrace/reader`) bindings to the
+  engine with named `EngineUnavailable` absence; the pure writer and
+  check/export/stats keep working without native code.
+- PyPI ships abi3 wheels (manylinux2014 x86_64, macOS arm64) plus the pure
+  `py3-none-any` fallback; the npm tarball carries both `.node` files; CLI
+  binaries ship on GitHub releases. All behind the existing reviewed-hash
+  publish gates; no sdist that needs a Rust toolchain.
+- Conformance corpus with golden outputs asserted from Rust, CLI, Python and
+  Node; frozen reader contract in `docs/reader.md`.
+
 ## 0.1.0
 
 Initial release, published to PyPI, crates.io and npm.
