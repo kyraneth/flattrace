@@ -1,0 +1,82 @@
+[
+  {
+    "file": "c01-parent.jsonl",
+    "issues": [],
+    "rows": 6
+  },
+  {
+    "file": "c02-child.jsonl",
+    "issues": [],
+    "rows": 3
+  },
+  {
+    "file": "c03-async.jsonl",
+    "issues": [],
+    "rows": 10
+  },
+  {
+    "file": "c04-unfinished.jsonl",
+    "issues": [
+      "unfinished run c04-unfinished: missing run end",
+      "inactive parent for 3333333333333333",
+      "unmatched end 9999999999999999",
+      "point outside active span 9999999999999999",
+      "unfinished span 1111111111111111: missing end",
+      "unfinished span 2222222222222222: missing end",
+      "unfinished span 3333333333333333: missing end"
+    ],
+    "rows": 5
+  },
+  {
+    "file": "c05-dup-a.jsonl",
+    "issues": [],
+    "rows": 4
+  },
+  {
+    "file": "c05-dup-b.jsonl",
+    "issues": [],
+    "rows": 4
+  },
+  {
+    "file": "c06-torn.jsonl",
+    "issues": [
+      "incomplete tail 3: Expecting ',' delimiter: line 1 column 24 (char 23)",
+      "unfinished run c06-torn: missing run end",
+      "unfinished span 1111111111111111: missing end",
+      "unfinished span 2222222222222222: missing end"
+    ],
+    "rows": 2
+  },
+  {
+    "file": "c07-payload.jsonl",
+    "issues": [],
+    "rows": 9
+  },
+  {
+    "file": "c08-baseline.jsonl",
+    "issues": [],
+    "rows": 7
+  },
+  {
+    "file": "c09-candidate.jsonl",
+    "issues": [],
+    "rows": 7
+  },
+  {
+    "file": "c10-archive.jsonl.gz",
+    "issues": [],
+    "rows": 3
+  },
+  {
+    "file": "c11-bad.jsonl",
+    "issues": [
+      "line 2: missing envelope fields",
+      "line 3: v must be 1",
+      "unfinished run c11-bad: missing run end",
+      "seq gap or reordering: expected 1, got 3",
+      "seq gap or reordering: expected 2, got 4",
+      "unfinished span 1111111111111111: missing end"
+    ],
+    "rows": 3
+  }
+]

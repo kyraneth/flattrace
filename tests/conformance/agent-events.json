@@ -1,0 +1,17 @@
+{
+  "tool": "agent",
+  "events": {
+    "run": {
+      "kind": "span",
+      "fields": {}
+    },
+    "agent.turn": {
+      "kind": "span",
+      "fields": {}
+    },
+    "tool.call": {
+      "kind": "span",
+      "fields": {}
+    }
+  }
+}

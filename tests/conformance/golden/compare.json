@@ -1,0 +1,279 @@
+{
+  "a": {
+    "coverage": {
+      "complete_runs": 1,
+      "duplicates_excluded": 0,
+      "files": 1,
+      "invalid_files": 0,
+      "issues": 0,
+      "points": 1,
+      "runs": 1,
+      "spans": 3,
+      "spans_unfinished": 0,
+      "statement": "1 files, 1 runs (1 complete, 0 unfinished, 0 invalid), 0 duplicate excluded, 3 spans paired (0 unfinished), 1 points, 0 issues",
+      "unfinished_runs": 0
+    },
+    "events": [
+      {
+        "event": "encode",
+        "summary": {
+          "errors": {
+            "occurrences": 0,
+            "records": 0
+          },
+          "n": 1,
+          "took": {
+            "max": 50,
+            "n": 1,
+            "p50": 50,
+            "p95": 50,
+            "total": 50
+          },
+          "unfinished": 0
+        },
+        "tool": "bench"
+      },
+      {
+        "event": "render",
+        "summary": {
+          "errors": {
+            "occurrences": 0,
+            "records": 0
+          },
+          "n": 1,
+          "took": {
+            "max": 100,
+            "n": 1,
+            "p50": 100,
+            "p95": 100,
+            "total": 100
+          },
+          "unfinished": 0
+        },
+        "tool": "bench"
+      },
+      {
+        "event": "run",
+        "summary": {
+          "errors": {
+            "occurrences": 0,
+            "records": 0
+          },
+          "n": 1,
+          "took": {
+            "max": 160,
+            "n": 1,
+            "p50": 160,
+            "p95": 160,
+            "total": 160
+          },
+          "unfinished": 0
+        },
+        "tool": "bench"
+      }
+    ],
+    "runs": [
+      {
+        "outcome": "ok",
+        "run": "c08-baseline",
+        "took_ms": 160,
+        "tool": "bench"
+      }
+    ]
+  },
+  "b": {
+    "coverage": {
+      "complete_runs": 1,
+      "duplicates_excluded": 0,
+      "files": 1,
+      "invalid_files": 0,
+      "issues": 0,
+      "points": 1,
+      "runs": 1,
+      "spans": 3,
+      "spans_unfinished": 0,
+      "statement": "1 files, 1 runs (1 complete, 0 unfinished, 0 invalid), 0 duplicate excluded, 3 spans paired (0 unfinished), 1 points, 0 issues",
+      "unfinished_runs": 0
+    },
+    "events": [
+      {
+        "event": "encode",
+        "summary": {
+          "errors": {
+            "occurrences": 1,
+            "records": 1
+          },
+          "n": 1,
+          "took": {
+            "max": 60,
+            "n": 1,
+            "p50": 60,
+            "p95": 60,
+            "total": 60
+          },
+          "unfinished": 0
+        },
+        "tool": "bench"
+      },
+      {
+        "event": "render",
+        "summary": {
+          "errors": {
+            "occurrences": 0,
+            "records": 0
+          },
+          "n": 1,
+          "took": {
+            "max": 80,
+            "n": 1,
+            "p50": 80,
+            "p95": 80,
+            "total": 80
+          },
+          "unfinished": 0
+        },
+        "tool": "bench"
+      },
+      {
+        "event": "run",
+        "summary": {
+          "errors": {
+            "occurrences": 1,
+            "records": 1
+          },
+          "n": 1,
+          "took": {
+            "max": 150,
+            "n": 1,
+            "p50": 150,
+            "p95": 150,
+            "total": 150
+          },
+          "unfinished": 0
+        },
+        "tool": "bench"
+      }
+    ],
+    "runs": [
+      {
+        "outcome": "error",
+        "run": "c09-candidate",
+        "took_ms": 150,
+        "tool": "bench"
+      }
+    ]
+  },
+  "events": [
+    {
+      "a": {
+        "errors": {
+          "occurrences": 0,
+          "records": 0
+        },
+        "n": 1,
+        "took": {
+          "max": 50,
+          "n": 1,
+          "p50": 50,
+          "p95": 50,
+          "total": 50
+        },
+        "unfinished": 0
+      },
+      "b": {
+        "errors": {
+          "occurrences": 1,
+          "records": 1
+        },
+        "n": 1,
+        "took": {
+          "max": 60,
+          "n": 1,
+          "p50": 60,
+          "p95": 60,
+          "total": 60
+        },
+        "unfinished": 0
+      },
+      "delta_n": 0,
+      "delta_p50": 10,
+      "delta_total": 10,
+      "event": "encode",
+      "tool": "bench"
+    },
+    {
+      "a": {
+        "errors": {
+          "occurrences": 0,
+          "records": 0
+        },
+        "n": 1,
+        "took": {
+          "max": 100,
+          "n": 1,
+          "p50": 100,
+          "p95": 100,
+          "total": 100
+        },
+        "unfinished": 0
+      },
+      "b": {
+        "errors": {
+          "occurrences": 0,
+          "records": 0
+        },
+        "n": 1,
+        "took": {
+          "max": 80,
+          "n": 1,
+          "p50": 80,
+          "p95": 80,
+          "total": 80
+        },
+        "unfinished": 0
+      },
+      "delta_n": 0,
+      "delta_p50": -20,
+      "delta_total": -20,
+      "event": "render",
+      "tool": "bench"
+    },
+    {
+      "a": {
+        "errors": {
+          "occurrences": 0,
+          "records": 0
+        },
+        "n": 1,
+        "took": {
+          "max": 160,
+          "n": 1,
+          "p50": 160,
+          "p95": 160,
+          "total": 160
+        },
+        "unfinished": 0
+      },
+      "b": {
+        "errors": {
+          "occurrences": 1,
+          "records": 1
+        },
+        "n": 1,
+        "took": {
+          "max": 150,
+          "n": 1,
+          "p50": 150,
+          "p95": 150,
+          "total": 150
+        },
+        "unfinished": 0
+      },
+      "delta_n": 0,
+      "delta_p50": -10,
+      "delta_total": -10,
+      "event": "run",
+      "tool": "bench"
+    }
+  ]
+}

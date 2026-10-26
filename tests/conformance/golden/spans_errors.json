@@ -1,0 +1,53 @@
+[
+  {
+    "children": [
+      "2222222222222222",
+      "3333333333333333",
+      "4444444444444444"
+    ],
+    "data": {
+      "argv": [
+        "synthetic"
+      ],
+      "host": "synthetic",
+      "pid": 4242,
+      "session_id": "session-7",
+      "version": "1"
+    },
+    "depth": 0,
+    "end_data": {},
+    "end_seq": 8,
+    "end_t": "2026-10-20T00:00:01.400Z",
+    "error": null,
+    "event": "run",
+    "file": "c07-payload.jsonl",
+    "outcome": "ok",
+    "parent": null,
+    "points": [
+      {
+        "data": {
+          "count": 5,
+          "where": "tool/load.py:44"
+        },
+        "error": {
+          "kind": "io",
+          "message": "coalesced synthetic failure"
+        },
+        "event": "failure",
+        "seq": 5,
+        "t": "2026-10-20T00:00:01.100Z"
+      }
+    ],
+    "run": "c07-payload",
+    "self_ms": null,
+    "self_unknown": "children exceed parent duration",
+    "span": "1111111111111111",
+    "start_seq": 0,
+    "start_t": "2026-10-20T00:00:01.000Z",
+    "took_ms": 400,
+    "tool": "synthetic-tool",
+    "tool_version": "1",
+    "trace": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+    "unfinished": false
+  }
+]

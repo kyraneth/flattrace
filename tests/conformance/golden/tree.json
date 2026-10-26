@@ -1,0 +1,53 @@
+{
+  "coverage": {
+    "complete_runs": 8,
+    "duplicates_excluded": 1,
+    "files": 12,
+    "invalid_files": 0,
+    "issues": 11,
+    "points": 5,
+    "runs": 11,
+    "spans": 29,
+    "spans_unfinished": 6,
+    "statement": "12 files, 11 runs (8 complete, 3 unfinished, 0 invalid), 1 duplicate excluded, 29 spans paired (6 unfinished), 5 points, 11 issues",
+    "unfinished_runs": 3
+  },
+  "failed": [],
+  "roots": [
+    {
+      "children": [
+        {
+          "children": [],
+          "failed": false,
+          "file": "c02-child.jsonl",
+          "outcome": "ok",
+          "parent_outside_corpus": false,
+          "parent_run": "c01-parent",
+          "parent_span": "3333333333333333",
+          "points": 1,
+          "run": "c02-child",
+          "spans": 1,
+          "status": "ok",
+          "took_ms": 5,
+          "tool": "agent",
+          "unfinished_spans": 0
+        }
+      ],
+      "failed": false,
+      "file": "c01-parent.jsonl",
+      "outcome": "ok",
+      "parent_outside_corpus": false,
+      "parent_run": null,
+      "parent_span": null,
+      "points": 0,
+      "run": "c01-parent",
+      "spans": 3,
+      "status": "ok",
+      "took_ms": 34,
+      "tool": "agent",
+      "unfinished_spans": 0
+    }
+  ],
+  "slowest": "c01-parent",
+  "trace": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

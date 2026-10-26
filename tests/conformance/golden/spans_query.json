@@ -1,0 +1,32 @@
+[
+  {
+    "children": [
+      "3333333333333333"
+    ],
+    "data": {
+      "effort": "high",
+      "model": "synthetic-model-b"
+    },
+    "depth": 1,
+    "end_data": {},
+    "end_seq": 4,
+    "end_t": "2026-10-20T00:00:00.033Z",
+    "error": null,
+    "event": "agent.turn",
+    "file": "c01-parent.jsonl",
+    "outcome": "ok",
+    "parent": "1111111111111111",
+    "points": [],
+    "run": "c01-parent",
+    "self_ms": 2.0,
+    "self_unknown": null,
+    "span": "2222222222222222",
+    "start_seq": 1,
+    "start_t": "2026-10-20T00:00:00.001Z",
+    "took_ms": 32,
+    "tool": "agent",
+    "tool_version": "synthetic",
+    "trace": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "unfinished": false
+  }
+]

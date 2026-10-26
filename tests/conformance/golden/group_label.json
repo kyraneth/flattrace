@@ -1,0 +1,354 @@
+{
+  "by": [
+    "event",
+    "data.shot"
+  ],
+  "coverage": {
+    "complete_runs": 8,
+    "duplicates_excluded": 1,
+    "files": 12,
+    "invalid_files": 0,
+    "issues": 11,
+    "points": 5,
+    "runs": 11,
+    "spans": 29,
+    "spans_unfinished": 6,
+    "statement": "12 files, 11 runs (8 complete, 3 unfinished, 0 invalid), 1 duplicate excluded, 29 spans paired (6 unfinished), 5 points, 11 issues",
+    "unfinished_runs": 3
+  },
+  "groups": [
+    {
+      "errors": {
+        "occurrences": 0,
+        "records": 0
+      },
+      "key": {
+        "data.shot": null,
+        "event": "agent.turn"
+      },
+      "n": 1,
+      "points": 0,
+      "self": {
+        "max": 2.0,
+        "n": 1,
+        "p50": 2.0,
+        "p95": 2.0,
+        "total": 2.0
+      },
+      "took": {
+        "max": 32,
+        "n": 1,
+        "p50": 32,
+        "p95": 32,
+        "total": 32
+      },
+      "unfinished": 0
+    },
+    {
+      "errors": {
+        "occurrences": 1,
+        "records": 1
+      },
+      "key": {
+        "data.shot": null,
+        "event": "encode"
+      },
+      "n": 2,
+      "points": 0,
+      "self": {
+        "max": 60.0,
+        "n": 2,
+        "p50": 50.0,
+        "p95": 60.0,
+        "total": 110.0
+      },
+      "took": {
+        "max": 60,
+        "n": 2,
+        "p50": 50,
+        "p95": 60,
+        "total": 110
+      },
+      "unfinished": 0
+    },
+    {
+      "errors": {
+        "occurrences": 0,
+        "records": 0
+      },
+      "key": {
+        "data.shot": null,
+        "event": "launch"
+      },
+      "n": 1,
+      "points": 0,
+      "self": null,
+      "took": {
+        "max": 10,
+        "n": 1,
+        "p50": 10,
+        "p95": 10,
+        "total": 10
+      },
+      "unfinished": 0
+    },
+    {
+      "errors": {
+        "occurrences": 0,
+        "records": 0
+      },
+      "key": {
+        "data.shot": null,
+        "event": "loop.stall"
+      },
+      "n": 1,
+      "points": 0,
+      "self": {
+        "max": 250.0,
+        "n": 1,
+        "p50": 250.0,
+        "p95": 250.0,
+        "total": 250.0
+      },
+      "took": {
+        "max": 250,
+        "n": 1,
+        "p50": 250,
+        "p95": 250,
+        "total": 250
+      },
+      "unfinished": 0
+    },
+    {
+      "errors": {
+        "occurrences": 0,
+        "records": 0
+      },
+      "key": {
+        "data.shot": null,
+        "event": "orphan"
+      },
+      "n": 1,
+      "points": 0,
+      "self": null,
+      "took": null,
+      "unfinished": 1
+    },
+    {
+      "errors": {
+        "occurrences": 0,
+        "records": 0
+      },
+      "key": {
+        "data.shot": null,
+        "event": "overlap-a"
+      },
+      "n": 1,
+      "points": 0,
+      "self": {
+        "max": 10.0,
+        "n": 1,
+        "p50": 10.0,
+        "p95": 10.0,
+        "total": 10.0
+      },
+      "took": {
+        "max": 10,
+        "n": 1,
+        "p50": 10,
+        "p95": 10,
+        "total": 10
+      },
+      "unfinished": 0
+    },
+    {
+      "errors": {
+        "occurrences": 0,
+        "records": 0
+      },
+      "key": {
+        "data.shot": null,
+        "event": "overlap-b"
+      },
+      "n": 1,
+      "points": 0,
+      "self": {
+        "max": 10.0,
+        "n": 1,
+        "p50": 10.0,
+        "p95": 10.0,
+        "total": 10.0
+      },
+      "took": {
+        "max": 10,
+        "n": 1,
+        "p50": 10,
+        "p95": 10,
+        "total": 10
+      },
+      "unfinished": 0
+    },
+    {
+      "errors": {
+        "occurrences": 0,
+        "records": 0
+      },
+      "key": {
+        "data.shot": null,
+        "event": "render"
+      },
+      "n": 2,
+      "points": 0,
+      "self": {
+        "max": 100.0,
+        "n": 2,
+        "p50": 80.0,
+        "p95": 100.0,
+        "total": 180.0
+      },
+      "took": {
+        "max": 100,
+        "n": 2,
+        "p50": 80,
+        "p95": 100,
+        "total": 180
+      },
+      "unfinished": 0
+    },
+    {
+      "errors": {
+        "occurrences": 6,
+        "records": 2
+      },
+      "key": {
+        "data.shot": null,
+        "event": "run"
+      },
+      "n": 11,
+      "points": 5,
+      "self": {
+        "max": 10.0,
+        "n": 6,
+        "p50": 2.0,
+        "p95": 10.0,
+        "total": 31.0
+      },
+      "took": {
+        "max": 400,
+        "n": 8,
+        "p50": 34,
+        "p95": 400,
+        "total": 800
+      },
+      "unfinished": 3
+    },
+    {
+      "errors": {
+        "occurrences": 0,
+        "records": 0
+      },
+      "key": {
+        "data.shot": null,
+        "event": "tool.call"
+      },
+      "n": 1,
+      "points": 0,
+      "self": {
+        "max": 30.0,
+        "n": 1,
+        "p50": 30.0,
+        "p95": 30.0,
+        "total": 30.0
+      },
+      "took": {
+        "max": 30,
+        "n": 1,
+        "p50": 30,
+        "p95": 30,
+        "total": 30
+      },
+      "unfinished": 0
+    },
+    {
+      "errors": {
+        "occurrences": 1,
+        "records": 1
+      },
+      "key": {
+        "data.shot": "sh001",
+        "event": "tool.exec"
+      },
+      "n": 2,
+      "points": 0,
+      "self": {
+        "max": 180.0,
+        "n": 2,
+        "p50": 120.0,
+        "p95": 180.0,
+        "total": 300.0
+      },
+      "took": {
+        "max": 180,
+        "n": 2,
+        "p50": 120,
+        "p95": 180,
+        "total": 300
+      },
+      "unfinished": 0
+    },
+    {
+      "errors": {
+        "occurrences": 0,
+        "records": 0
+      },
+      "key": {
+        "data.shot": null,
+        "event": "work"
+      },
+      "n": 4,
+      "points": 0,
+      "self": {
+        "max": 7.0,
+        "n": 1,
+        "p50": 7.0,
+        "p95": 7.0,
+        "total": 7.0
+      },
+      "took": {
+        "max": 9,
+        "n": 2,
+        "p50": 7,
+        "p95": 9,
+        "total": 16
+      },
+      "unfinished": 2
+    },
+    {
+      "errors": {
+        "occurrences": 0,
+        "records": 0
+      },
+      "key": {
+        "data.shot": null,
+        "event": "worker"
+      },
+      "n": 1,
+      "points": 0,
+      "self": {
+        "max": 25.0,
+        "n": 1,
+        "p50": 25.0,
+        "p95": 25.0,
+        "total": 25.0
+      },
+      "took": {
+        "max": 25,
+        "n": 1,
+        "p50": 25,
+        "p95": 25,
+        "total": 25
+      },
+      "unfinished": 0
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "coverage": {
+    "complete_runs": 8,
+    "duplicates_excluded": 1,
+    "files": 12,
+    "invalid_files": 0,
+    "issues": 11,
+    "points": 5,
+    "runs": 11,
+    "spans": 29,
+    "spans_unfinished": 6,
+    "statement": "12 files, 11 runs (8 complete, 3 unfinished, 0 invalid), 1 duplicate excluded, 29 spans paired (6 unfinished), 5 points, 11 issues",
+    "unfinished_runs": 3
+  },
+  "unbounded_windows": [],
+  "window_event": "loop.stall",
+  "windows": [
+    {
+      "end_t": "2026-10-20T00:00:01.250Z",
+      "overlapping": [
+        {
+          "event": "tool.exec",
+          "file": "c07-payload.jsonl",
+          "outcome": "ok",
+          "span": "2222222222222222",
+          "start_seq": 1,
+          "took_ms": 120,
+          "unfinished": false
+        },
+        {
+          "event": "tool.exec",
+          "file": "c07-payload.jsonl",
+          "outcome": "error",
+          "span": "3333333333333333",
+          "start_seq": 2,
+          "took_ms": 180,
+          "unfinished": false
+        }
+      ],
+      "start_t": "2026-10-20T00:00:01.000Z",
+      "window": {
+        "file": "c07-payload.jsonl",
+        "span": "4444444444444444",
+        "start_seq": 3
+      }
+    }
+  ]
+}

@@ -1,0 +1,102 @@
+[
+  {
+    "children": [
+      "2222222222222222"
+    ],
+    "data": {
+      "argv": [
+        "synthetic"
+      ],
+      "env": {
+        "agent.name": "synthetic-agent",
+        "gen_ai.request.model": "synthetic-model-a"
+      },
+      "host": "synthetic",
+      "pid": 4242,
+      "session_id": "session-1",
+      "task": "synthetic-task",
+      "variant": "baseline",
+      "version": "synthetic"
+    },
+    "depth": 0,
+    "end_data": {},
+    "end_seq": 5,
+    "end_t": "2026-10-20T00:00:00.034Z",
+    "error": null,
+    "event": "run",
+    "file": "c01-parent.jsonl",
+    "outcome": "ok",
+    "parent": null,
+    "points": [],
+    "run": "c01-parent",
+    "self_ms": 2.0,
+    "self_unknown": null,
+    "span": "1111111111111111",
+    "start_seq": 0,
+    "start_t": "2026-10-20T00:00:00.000Z",
+    "took_ms": 34,
+    "tool": "agent",
+    "tool_version": "synthetic",
+    "trace": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "unfinished": false
+  },
+  {
+    "children": [
+      "3333333333333333"
+    ],
+    "data": {
+      "effort": "high",
+      "model": "synthetic-model-b"
+    },
+    "depth": 1,
+    "end_data": {},
+    "end_seq": 4,
+    "end_t": "2026-10-20T00:00:00.033Z",
+    "error": null,
+    "event": "agent.turn",
+    "file": "c01-parent.jsonl",
+    "outcome": "ok",
+    "parent": "1111111111111111",
+    "points": [],
+    "run": "c01-parent",
+    "self_ms": 2.0,
+    "self_unknown": null,
+    "span": "2222222222222222",
+    "start_seq": 1,
+    "start_t": "2026-10-20T00:00:00.001Z",
+    "took_ms": 32,
+    "tool": "agent",
+    "tool_version": "synthetic",
+    "trace": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "unfinished": false
+  },
+  {
+    "children": [],
+    "data": {
+      "args_hash": "abc123",
+      "session_id": "session-1",
+      "tool": "oxblend"
+    },
+    "depth": 2,
+    "end_data": {},
+    "end_seq": 3,
+    "end_t": "2026-10-20T00:00:00.032Z",
+    "error": null,
+    "event": "tool.call",
+    "file": "c01-parent.jsonl",
+    "outcome": "ok",
+    "parent": "2222222222222222",
+    "points": [],
+    "run": "c01-parent",
+    "self_ms": 30.0,
+    "self_unknown": null,
+    "span": "3333333333333333",
+    "start_seq": 2,
+    "start_t": "2026-10-20T00:00:00.002Z",
+    "took_ms": 30,
+    "tool": "agent",
+    "tool_version": "synthetic",
+    "trace": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "unfinished": false
+  }
+]
