@@ -278,9 +278,11 @@ impl Writer {
         self.active.remove(span);
         Ok(())
     }
-    pub fn finish(mut self, outcome: &str) -> io::Result<()> {
+    pub fn finish(self, outcome: &str) -> io::Result<()> { self.finish_with(outcome, json!({})) }
+    /// End the run with a run-end payload (e.g. totals).
+    pub fn finish_with(mut self, outcome: &str, data: Value) -> io::Result<()> {
         if self.active.keys().any(|span| span != &self.root) { return Err(invalid("local spans still active")); }
-        self.end_span(&self.root.clone(), outcome, json!({}), None)
+        self.end_span(&self.root.clone(), outcome, data, None)
     }
     // Dropping a writer closes the file without inventing an end.
 }
@@ -551,6 +553,18 @@ mod tests {
             assert_eq!(child["parent"], w.root);
         }
         w.finish("ok").unwrap();
+    }
+    #[test]
+    fn finish_with_carries_run_end_data() {
+        let path = target();
+        let w = Writer::create(&path, "test", "1", vec![], "test-host").unwrap();
+        w.finish_with("ok", json!({"turns": 3, "tokens": null})).unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let last: Value = serde_json::from_str(text.lines().last().unwrap()).unwrap();
+        assert_eq!(last["event"], "run");
+        assert_eq!(last["data"]["turns"], 3);
+        assert!(last["data"]["tokens"].is_null());
+        std::fs::remove_file(path).unwrap();
     }
     #[test]
     fn drop_leaves_run_unfinished_and_bad_context_is_rejected() {
