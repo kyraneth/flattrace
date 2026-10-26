@@ -57,6 +57,8 @@ usage; they do not change the envelope or checker behavior.
   MUST report an API error; environment-mode writers MUST warn and return
   without raising (Rust returns `Ok(())`), leaving the root active.
   `close`/`finish` with active local spans MUST remain an API error.
+  `close`/`finish` MAY carry a run-end `data` payload (for example run totals),
+  normalized like any other payload; omitted means `{}`.
 - `took_ms` MUST measure local elapsed residence, starting after the start write
   and ending before the end write. Consumers MUST NOT derive durations from
   wall timestamps or sum nested/overlapping durations as elapsed work.

@@ -45,6 +45,20 @@ test('writer flushes, pairs spans, errors and learning data pass the common chec
   assert.throws(() => new Writer(path, 'test', '1'), /EEXIST/);
 });
 
+test('close carries a normalized run-end payload', t => {
+  const path = join(fixture(t), 'close.jsonl');
+  const w = new Writer(path, 'agent', 'dev');
+  w.close('ok', { turns: 3, tokens: null, ratio: NaN });
+  const rows = readFileSync(path, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  const last = rows.at(-1);
+  assert.equal(last.event, 'run');
+  assert.equal(last.data.turns, 3);
+  assert.equal(last.data.tokens, null);
+  assert.equal(last.data.ratio, null);
+  assert.ok(last.data.notes.length > 0);
+  assert.equal(check(path).status, 0);
+});
+
 test('cross-process parentage and flags survive the environment entry point', t => {
   const dir = fixture(t);
   const parentPath = join(dir, 'agent.jsonl');

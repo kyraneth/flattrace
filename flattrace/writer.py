@@ -288,10 +288,11 @@ class Writer:
     def child_env(self, span=None):
         return {**os.environ, CONTEXT_ENV: self.traceparent(span)}
 
-    def close(self, outcome="ok"):
+    def close(self, outcome="ok", data=None):
+        """End the run. Optional ``data`` is the run-end payload (e.g. totals)."""
         if any(span != self.root for span in self.active):
             raise ValueError("local spans still active")
-        self._end(self.root, outcome)
+        self._end(self.root, outcome, data)
         if self.file is not None:
             try:
                 self.file.close()

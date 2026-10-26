@@ -270,9 +270,10 @@ export class Writer {
   childEnv(span = this.root): Record<string, string | undefined> {
     return { ...process.env, [CONTEXT_ENV]: this.traceparent(span) };
   }
-  close(outcome = 'ok'): void {
+  // Optional data is the run-end payload (e.g. totals), normalized like any end.
+  close(outcome = 'ok', data: Data = {}): void {
     if ([...this.active.keys()].some(span => span !== this.root)) throw new Error('local spans still active');
-    this.endSpan(this.root, outcome);
+    this.endSpan(this.root, outcome, data);
     if (this.file !== null) {
       try { closeSync(this.file); }
       catch (error) {

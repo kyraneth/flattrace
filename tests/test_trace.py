@@ -32,6 +32,18 @@ class TraceTests(unittest.TestCase):
         return subprocess.run([sys.executable, "-m", "flattrace", *map(str, args)],
                               cwd=ROOT, capture_output=True, text=True)
 
+    def test_close_carries_run_end_data(self):
+        writer = Writer(self.path, "agent", "dev")
+        writer.close("ok", {"turns": 3, "tokens": None, "ratio": float("nan")})
+        rows, issues = read_trace(self.path)
+        self.assertFalse(issues)
+        self.assertEqual(rows[-1]["event"], "run")
+        self.assertEqual(rows[-1]["data"]["turns"], 3)
+        self.assertIsNone(rows[-1]["data"]["tokens"])
+        self.assertIsNone(rows[-1]["data"]["ratio"])
+        self.assertTrue(rows[-1]["data"]["notes"])
+        self.assertEqual(self.command("check", self.path).returncode, 0)
+
     def test_write_read_and_flush(self):
         writer = Writer(self.path, "oxblend", "dev", argv=["inspect"])
         self.assertEqual(len(self.path.read_text().splitlines()), 1)
