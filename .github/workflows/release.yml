@@ -352,7 +352,7 @@ jobs:
           python -m venv "$RUNNER_TEMP/venv"
           source "$RUNNER_TEMP/venv/bin/activate"
           python -m pip install --no-cache-dir "maturin==1.15.0"
-          python -m maturin develop --locked --release --manifest-path crates/flattrace-py/Cargo.toml
+          python -m maturin develop --locked --release
           python -m unittest -v
           python -m unittest discover -s bench -p 'test_*.py' -v
           cargo +1.94.1 test --manifest-path crates/flattrace/Cargo.toml --locked

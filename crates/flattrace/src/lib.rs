@@ -568,7 +568,10 @@ mod tests {
         w.finish("ok").unwrap();
         let text = std::fs::read_to_string(&path).unwrap();
         let row: Value = serde_json::from_str(text.lines().nth(2).unwrap()).unwrap();
-        assert_eq!(row["took_ms"].as_f64().unwrap(), took);
+        // serde_json's default float parser may differ from the written
+        // shortest representation by one ulp, so compare at that precision.
+        let written = row["took_ms"].as_f64().unwrap();
+        assert!((written - took).abs() <= f64::EPSILON * took.abs().max(1.0), "{written} vs {took}");
         std::fs::remove_file(path).unwrap();
     }
     #[test]
