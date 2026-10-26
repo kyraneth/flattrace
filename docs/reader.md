@@ -63,7 +63,9 @@ corpus analysis never merges divergent copies of one run.
 `digest`, `group`, `tree`, `compare` and `overlap` outputs all embed
 `coverage`: `{files, runs, complete_runs, unfinished_runs, invalid_files,
 duplicates_excluded, spans, spans_unfinished, points, issues, statement}`.
-`statement` is the same counts as one human sentence.
+`statement` is the same counts as one human sentence. The `issues` count
+covers run/pairing/boundary evidence per run; malformed-line details are
+check-level evidence and appear in `check` output, not here.
 
 ## Filters
 
@@ -129,7 +131,39 @@ unchanged shape), `digest [--filter JSON]`, `spans [--filter JSON]`,
 `tree --trace ID`, `group --by a,b [--metrics m,n] [--filter JSON]`,
 `compare --a A.jsonl [--a ...] --b B.jsonl [--b ...]`,
 `overlap --window EVENT [--filter JSON]`, each with `--json` (default) and a
-compact text form. Filters arrive as one JSON object with the fields above.
+compact text form. `spans` is a row query and exits 0 on success; the other
+commands exit 1 when the corpus carries validation or unfinished evidence
+and 2 on invocation or I/O failure. Filters arrive as one JSON object with
+the fields above.
+
+## Parser-detail note (frozen)
+
+Issue identity is the category prefix; malformed-JSON detail text is
+informative. For issues whose detail comes from the JSON parser itself
+(`line N: ...` / `incomplete tail N: ...` where the remainder is not one of
+the frozen validation messages below), ports compare only the prefix. Every
+other issue string is byte-identical across implementations. The frozen
+validation messages are: `missing envelope fields`,
+`seq must be a nonnegative integer`, `v must be 1`, `<field> must be a string`
+for `tool`, `tool_version`, `run`, `event`, `state` and `t`, `invalid trace`,
+`invalid span`, `invalid parent`, `run is reserved for lifetime spans`,
+`invalid state or data`, `t must be RFC3339 UTC`,
+`end requires took_ms and outcome`, `invalid took_ms`,
+`took_ms and outcome belong on ends`,
+`error requires string kind and message`, plus the run-boundary strings
+`missing run start and end`, `first line must be run start`,
+`run start requires argv, host, version`, `run <task|variant> must be a string`,
+`file contains different runs or tools`, `unfinished run <id>: missing run end`,
+`last line must be the matching run end`, `expected one run start`,
+`seq gap or reordering: expected <n>, got <m>`, `duplicate span start <span>`,
+`inactive parent for <span>`, `unmatched end <span>`,
+`point outside active span <span>`, `unfinished span <span>: missing end`,
+`incomplete gzip archive: ...`, and the contract strings
+`event list tool mismatch`,
+`select a command with --command (or run data.command) for this contract`,
+`undeclared command '<id>'`, `undeclared event <name>`,
+`wrong event kind <name>`, `missing required event <name> for <command>`,
+`level <n> event <name> in level <m> run`.
 
 ## Versioning
 

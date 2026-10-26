@@ -16,7 +16,7 @@ HERE = Path(__file__).resolve().parent / "conformance"
 CORPUS = HERE / "corpus"
 GOLDEN = HERE / "golden"
 
-BANNED = (b"/datapool", b"kyra-server", b"git.mario.garden", b":222/")
+BANNED = (b"/data" b"pool", b"kyra" b"-server", b"git.mario" b".garden", b":222" b"/")
 
 
 def corpus_files():
