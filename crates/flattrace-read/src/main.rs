@@ -278,8 +278,11 @@ fn has_issues(command: &str, value: &serde_json::Value) -> bool {
         })).unwrap_or(false),
         "spans" => false,
         "compare" => ["a", "b"].iter().any(|side| {
-            value.get(side).and_then(|v| v.get("coverage")).and_then(|c| c.get("issues"))
-                .and_then(|v| v.as_i64()).unwrap_or(0) > 0
+            let coverage = value.get(side).and_then(|v| v.get("coverage"));
+            let issues = coverage.and_then(|c| c.get("issues")).and_then(|v| v.as_i64()).unwrap_or(0);
+            let invalid = coverage.and_then(|c| c.get("invalid_files")).and_then(|v| v.as_i64()).unwrap_or(0);
+            let duplicates = coverage.and_then(|c| c.get("duplicates_with_issues")).and_then(|v| v.as_i64()).unwrap_or(0);
+            issues > 0 || invalid > 0 || duplicates > 0
         }),
         "stats" => {
             let runs = value.get("runs").and_then(|v| v.as_array()).map(|r| r.len()).unwrap_or(0);
@@ -294,8 +297,13 @@ fn has_issues(command: &str, value: &serde_json::Value) -> bool {
                 })).unwrap_or(false);
             invalid > 0 || duplicates > 0 || run_issues || runs == 0
         }
-        _ => value.get("coverage").and_then(|c| c.get("issues"))
-            .and_then(|v| v.as_i64()).unwrap_or(0) > 0,
+        _ => {
+            let coverage = value.get("coverage");
+            let issues = coverage.and_then(|c| c.get("issues")).and_then(|v| v.as_i64()).unwrap_or(0);
+            let invalid = coverage.and_then(|c| c.get("invalid_files")).and_then(|v| v.as_i64()).unwrap_or(0);
+            let duplicates = coverage.and_then(|c| c.get("duplicates_with_issues")).and_then(|v| v.as_i64()).unwrap_or(0);
+            issues > 0 || invalid > 0 || duplicates > 0
+        },
     }
 }
 

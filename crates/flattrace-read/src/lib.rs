@@ -19,11 +19,57 @@ pub use pair::Corpus;
 /// and `flattrace stats`); 2 means invocation or I/O failure.
 pub type EngineError = (u8, String);
 
-fn load(paths: &[String]) -> Result<Corpus, EngineError> {
+fn walk_sorted(dir: &Path, out: &mut Vec<String>) -> Result<(), String> {
+    let fail = |path: &Path, e: std::io::Error| format!("{}: {e}", path.display());
+    let mut entries: Vec<std::fs::DirEntry> = std::fs::read_dir(dir)
+        .map_err(|e| fail(dir, e))?
+        .collect::<Result<_, _>>()
+        .map_err(|e| fail(dir, e))?;
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
+        let path = entry.path();
+        let file_type = entry.file_type().map_err(|e| fail(&path, e))?;
+        let is_link =
+            std::fs::symlink_metadata(&path).map(|m| m.file_type().is_symlink()).unwrap_or(false);
+        if file_type.is_dir() && !is_link {
+            walk_sorted(&path, out)?;
+        } else {
+            let name = path.to_string_lossy();
+            if name.ends_with(".jsonl") || name.ends_with(".jsonl.gz") {
+                out.push(name.into_owned());
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Accept explicit files and directories, mirroring
+/// `flattrace.stats.trace_files`: recursive, sorted, never following dir
+/// links. An empty expansion is an invocation failure.
+fn expand_inputs(paths: &[String]) -> Result<Vec<String>, EngineError> {
     if paths.is_empty() {
         return Err((2, "no input files".to_string()));
     }
-    Corpus::load(paths).map_err(|e| (2, e.to_string()))
+    let mut out = Vec::new();
+    for path in paths {
+        let fs_path = Path::new(path);
+        match std::fs::symlink_metadata(fs_path) {
+            Err(e) => return Err((2, format!("{path}: {e}"))),
+            Ok(meta) if meta.file_type().is_dir() && !meta.file_type().is_symlink() => {
+                walk_sorted(fs_path, &mut out).map_err(|e| (2, e))?;
+            }
+            Ok(_) => out.push(path.clone()),
+        }
+    }
+    if out.is_empty() {
+        return Err((2, "no .jsonl or .jsonl.gz trace files found".to_string()));
+    }
+    Ok(out)
+}
+
+fn load(paths: &[String]) -> Result<Corpus, EngineError> {
+    let paths = expand_inputs(paths)?;
+    Corpus::load(&paths).map_err(|e| (2, e.to_string()))
 }
 
 fn parse_optional(text: Option<&str>) -> Result<Option<Value>, EngineError> {
@@ -34,15 +80,16 @@ fn parse_optional(text: Option<&str>) -> Result<Option<Value>, EngineError> {
 }
 
 pub fn check(paths: &[String], events_path: Option<&str>, command: Option<&str>) -> Result<Value, EngineError> {
-    if paths.is_empty() {
-        return Err((2, "no input files".to_string()));
-    }
+    let paths = expand_inputs(paths)?;
     let contract = match events_path {
-        Some(path) => Some(validate::read_events(Path::new(path)).map_err(|e| (1, e))?),
+        Some(path) => Some(validate::read_events(Path::new(path)).map_err(|e| match e {
+            validate::ReadEventsError::Io(inner) => (2, inner.to_string()),
+            validate::ReadEventsError::Invalid(msg) => (1, msg),
+        })?),
         None => None,
     };
     let mut out = Vec::new();
-    for path in paths {
+    for path in &paths {
         let (rows, mut issues) = validate::read_trace(Path::new(path)).map_err(|e| (2, e.to_string()))?;
         if let Some(contract) = &contract {
             issues.extend(validate::check_events(&rows, contract, command));

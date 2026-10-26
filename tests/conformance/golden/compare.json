@@ -3,6 +3,7 @@
     "coverage": {
       "complete_runs": 1,
       "duplicates_excluded": 0,
+      "duplicates_with_issues": 0,
       "files": 1,
       "invalid_files": 0,
       "issues": 0,
@@ -85,6 +86,7 @@
     "coverage": {
       "complete_runs": 1,
       "duplicates_excluded": 0,
+      "duplicates_with_issues": 0,
       "files": 1,
       "invalid_files": 0,
       "issues": 0,

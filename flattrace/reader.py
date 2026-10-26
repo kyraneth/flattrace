@@ -29,8 +29,9 @@ def _engine():
         raise EngineUnavailable(
             "flattrace reader engine unavailable: no compiled "
             f"_flattrace_read for {system}-{machine} on Python "
-            f"{sys.version_info.major}.{sys.version_info.minor}; install a "
-            "platform abi3 wheel instead of the pure py3-none-any fallback"
+            f"{sys.version_info.major}.{sys.version_info.minor} "
+            f"(loader failed with: {exc}); install a platform abi3 wheel "
+            "instead of the pure py3-none-any fallback"
         ) from exc
 
 

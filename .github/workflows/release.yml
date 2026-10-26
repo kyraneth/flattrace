@@ -65,7 +65,7 @@ jobs:
           # stays on the host so no in-container Node is needed. abi3 wheels
           # do not link the building interpreter; cp311 only runs maturin.
           docker run --rm -v "$PWD:/io" -w /io quay.io/pypa/manylinux2014_x86_64 \
-            bash -lc 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.94.1 && export PATH="$HOME/.cargo/bin:$PATH" && /opt/python/cp311-cp311/bin/python -m pip install --no-cache-dir "maturin==1.15.0" && /opt/python/cp311-cp311/bin/python -m maturin build --release --compatibility manylinux2014 --out dist/abi3'
+            bash -lc 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.94.1 && export PATH="$HOME/.cargo/bin:$PATH" && /opt/python/cp311-cp311/bin/python -m pip install --no-cache-dir "maturin==1.15.0" && /opt/python/cp311-cp311/bin/python -m maturin build --locked --release --compatibility manylinux2014 --out dist/abi3'
           ls dist/abi3/*.whl | tee "$RUNNER_TEMP/abi3-linux.txt"
           test "$(wc -l < "$RUNNER_TEMP/abi3-linux.txt")" = 1
 
@@ -101,7 +101,7 @@ jobs:
       - name: Build abi3 macOS wheel
         run: |
           umask 002
-          python -m maturin build --release --out dist/abi3
+          python -m maturin build --locked --release --out dist/abi3
           ls dist/abi3/*.whl | tee "$RUNNER_TEMP/abi3-macos.txt"
           test "$(wc -l < "$RUNNER_TEMP/abi3-macos.txt")" = 1
 
@@ -339,7 +339,7 @@ jobs:
       - name: Run all test suites
         run: |
           umask 002
-          python -m maturin develop --release --manifest-path crates/flattrace-py/Cargo.toml
+          python -m maturin develop --locked --release --manifest-path crates/flattrace-py/Cargo.toml
           python -m unittest -v
           python -m unittest discover -s bench -p 'test_*.py' -v
           cargo +1.94.1 test --manifest-path crates/flattrace/Cargo.toml --locked
@@ -385,7 +385,7 @@ jobs:
           out.append('\n[tool.uv.build-backend]\nmodule-root = ""\nmodule-name = "flattrace"\n')
           Path('pyproject.toml').write_text(''.join(out))
           PY
-          uv build --python 3.13.11 --no-sources --out-dir dist/python
+          uv build --python 3.13.11 --no-sources --wheel --out-dir dist/python
           git checkout -- pyproject.toml
           npm --prefix typescript run build
           mkdir -p dist/npm

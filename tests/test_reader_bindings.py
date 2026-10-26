@@ -113,6 +113,7 @@ class ReaderBindingTests(unittest.TestCase):
             "overlap.json",
             self.reader.overlap(corpus_files(), "loop.stall", {"event": "tool.exec"}))
 
+    @needs_engine
     def test_spans_runend(self):
         rooted = [os.path.join(CORPUS, "closedata", "01.jsonl")]
         rows = self.reader.spans(rooted)
@@ -120,6 +121,20 @@ class ReaderBindingTests(unittest.TestCase):
         run = next(r for r in rows if r["event"] == "run")
         self.assertEqual(run["end_data"],
                          {"turns": 3, "tokens": 42, "totals": {"took_ms": 40}})
+
+    @needs_engine
+    def test_parity_corpus(self):
+        files = sorted(os.path.join(CORPUS, "parity", name)
+                       for name in os.listdir(os.path.join(CORPUS, "parity")))
+        self.check_golden("parity_digest.json", self.reader.digest(files))
+        self.check_golden("parity_spans_model_nested.json",
+                          self.reader.spans(files, {"model": "nested-m"}))
+        self.assertEqual(self.reader.spans(files, {"model": "nested-m"}), [])
+        matched = self.reader.spans(files, {"model": "env-m"})
+        self.check_golden("parity_spans_model_empty.json", matched)
+        self.assertEqual([(s["event"], s["span"]) for s in matched],
+                         [("run", "1111111111111111"),
+                          ("work", "2222222222222222")])
 
     @needs_engine
     def test_matches_reference_float_policy(self):

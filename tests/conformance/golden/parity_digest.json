@@ -1,0 +1,97 @@
+{
+  "coverage": {
+    "complete_runs": 4,
+    "duplicates_excluded": 0,
+    "duplicates_with_issues": 0,
+    "files": 6,
+    "invalid_files": 1,
+    "issues": 10,
+    "points": 0,
+    "runs": 5,
+    "spans": 10,
+    "spans_unfinished": 2,
+    "statement": "6 files, 5 runs (4 complete, 1 unfinished, 1 invalid), 0 duplicate excluded, 10 spans paired (2 unfinished), 0 points, 10 issues",
+    "unfinished_runs": 1
+  },
+  "errors": [],
+  "table": [
+    {
+      "errors": {
+        "occurrences": 0,
+        "records": 0
+      },
+      "event": "run",
+      "n": 6,
+      "self": {
+        "max": 2.0,
+        "n": 2,
+        "p50": 2.0,
+        "p95": 2.0,
+        "total": 4.0
+      },
+      "self_unknown": {
+        "incomplete or invalid run": 3,
+        "unfinished": 1
+      },
+      "slowest": {
+        "file": "parity/mixed-after-end.jsonl",
+        "span": "1111111111111111",
+        "start_seq": 0
+      },
+      "took": {
+        "max": 6,
+        "n": 5,
+        "p50": 4,
+        "p95": 6,
+        "total": 18
+      },
+      "tool": "t",
+      "unfinished": 1
+    },
+    {
+      "errors": {
+        "occurrences": 0,
+        "records": 0
+      },
+      "event": "work",
+      "n": 4,
+      "self": {
+        "max": 2.0,
+        "n": 2,
+        "p50": 2.0,
+        "p95": 2.0,
+        "total": 4.0
+      },
+      "self_unknown": {
+        "incomplete or invalid run": 1,
+        "unfinished": 1
+      },
+      "slowest": {
+        "file": "parity/mixed-after-end.jsonl",
+        "span": "2222222222222222",
+        "start_seq": 1
+      },
+      "took": {
+        "max": 4,
+        "n": 3,
+        "p50": 2,
+        "p95": 4,
+        "total": 8
+      },
+      "tool": "t",
+      "unfinished": 1
+    }
+  ],
+  "unfinished": [
+    {
+      "file": "parity/nonrun-first.jsonl",
+      "span": "2222222222222222",
+      "start_seq": 0
+    },
+    {
+      "file": "parity/second-run-start.jsonl",
+      "span": "2222222222222222",
+      "start_seq": 1
+    }
+  ]
+}

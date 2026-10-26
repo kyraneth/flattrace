@@ -2,6 +2,7 @@
   "coverage": {
     "complete_runs": 8,
     "duplicates_excluded": 1,
+    "duplicates_with_issues": 0,
     "files": 12,
     "invalid_files": 0,
     "issues": 11,

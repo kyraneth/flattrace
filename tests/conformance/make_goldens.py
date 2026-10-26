@@ -50,6 +50,8 @@ def main():
     closedata = [str(CORPUS / "closedata" / "01.jsonl")]
     for p in closedata:
         assert Path(p).exists(), p
+    parity = sorted(str(p) for p in (CORPUS / "parity").glob("*.jsonl"))
+    assert parity, "parity fixtures missing"
     write("check.json", reference.check(files))
     write("check_events.json",
           reference.check([str(CORPUS / "c01-parent.jsonl")],
@@ -80,6 +82,11 @@ def main():
     write("overlap.json",
           reference.overlap(files, "loop.stall", {"event": "tool.exec"}))
     write("spans_runend.json", reference.spans(closedata))
+    write("parity_digest.json", reference.digest(parity))
+    write("parity_spans_model_nested.json",
+          reference.spans(parity, {"model": "nested-m"}))
+    write("parity_spans_model_empty.json",
+          reference.spans(parity, {"model": "env-m"}))
 
 
 if __name__ == "__main__":

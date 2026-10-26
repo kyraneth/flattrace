@@ -14,10 +14,11 @@ import { fileURLToPath } from 'node:url';
 
 export class EngineUnavailable extends Error {
   readonly code = 'EngineUnavailable';
-  constructor(platform: string, arch: string) {
+  constructor(platform: string, arch: string, detail?: string) {
     super(
-      `flattrace reader engine unavailable: no bundled binary for ${platform}-${arch}; ` +
-        `only linux-x64-gnu and darwin-arm64 ship with this package`
+      `flattrace reader engine unavailable: no bundled binary for ${platform}-${arch}` +
+        (detail ? ` (${detail})` : '') +
+        `; only linux-x64-gnu and darwin-arm64 ship with this package`
     );
     this.name = 'EngineUnavailable';
   }
@@ -59,15 +60,22 @@ function engine(): NativeBinding {
     if (!file) throw new EngineUnavailable(process.platform, process.arch);
     const require = createRequire(import.meta.url);
     let loaded: NativeBinding | null = null;
+    let lastError: unknown = null;
     for (const dir of candidateDirs()) {
       try {
         loaded = require(join(dir, file)) as NativeBinding;
         break;
-      } catch {
-        // try the next candidate directory
+      } catch (error) {
+        lastError = error;
       }
     }
-    if (!loaded) throw new EngineUnavailable(process.platform, process.arch);
+    if (!loaded) {
+      throw new EngineUnavailable(
+        process.platform,
+        process.arch,
+        lastError instanceof Error ? lastError.message : String(lastError)
+      );
+    }
     cached = loaded;
   }
   return cached;

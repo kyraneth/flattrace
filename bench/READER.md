@@ -29,8 +29,8 @@ typed structs and spills only quantile samples (like stats.py).
 
 | corpus (frozen) | files | bytes | events | python stats (3 runs → median) | `flattrace-read stats` (3 runs → median) | median ratio python/rust |
 |---|---|---|---|---|---|---|
-| synthetic (seed 7) | 40 | 11,199,064 | 39,842 | 1.28 1.24 1.14 → **1.24** | 0.53 0.49 0.50 → **0.50** | **2.48** |
-| zamil-snap | 456 | 94,182,395 | 251,092 | 7.40 7.28 7.75 → **7.40** | 2.91 3.09 2.95 → **2.95** | **2.51** |
+| synthetic (seed 7) | 40 | 11,199,064 | 39,842 | 1.55 1.41 1.28 → **1.41** | 0.62 0.59 0.72 → **0.62** | **2.27** |
+| zamil-snap | 456 | 94,182,395 | 251,092 | 10.66 10.65 8.99 → **10.65** | 3.64 5.16 5.21 → **5.16** | **2.06** |
 
 The engine is faster on both corpora on the in-memory typed model: the
 per-JSON-line parse happens once into typed structs with no re-serialization,

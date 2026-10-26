@@ -116,9 +116,9 @@ def pair_run(path, rows, duplicates, errors, warnings):
                 note("duplicate span start", f"line {number}: duplicate span start")
                 continue
             frame = Frame(name, parent, len(active))
-            if name == "run" and span != rows[0]["span"]:
+            if name == "run" and (root is None or span != root):
                 note("unexpected run start", f"line {number}: unexpected run start")
-            if span != rows[0]["span"] and parent not in active:
+            if (root is None or span != root) and parent not in active:
                 note("inactive parent", f"line {number}: inactive parent")
             if parent in active:
                 owner = active[parent]
@@ -397,12 +397,16 @@ def coverage_of(corpus):
     points = sum(len(s["points"]) for s in spans)
     issues = sum(len(r["issues"]) for r in runs)
     duplicates = sum(1 for f in corpus["files"] if f.get("duplicate_of"))
+    duplicates_with_issues = sum(
+        1 for r in corpus["runs"]
+        if r.get("duplicate_excluded") and r["issues"])
     invalid = len(corpus["invalid"])
     coverage = {"files": len(corpus["files"]), "runs": len(runs),
                 "complete_runs": complete,
                 "unfinished_runs": len(runs) - complete,
                 "invalid_files": invalid,
                 "duplicates_excluded": duplicates,
+                "duplicates_with_issues": duplicates_with_issues,
                 "spans": len(spans), "spans_unfinished": unfinished,
                 "points": points, "issues": issues}
     coverage["statement"] = (

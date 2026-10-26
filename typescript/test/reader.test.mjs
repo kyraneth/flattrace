@@ -168,3 +168,18 @@ test('spans run-end data matches golden', () => {
   assert.deepEqual(run.end_data, { turns: 3, tokens: 42, totals: { took_ms: 40 } });
   checkGolden('spans_runend.json', rows);
 });
+
+test('parity corpus digest and model filters match goldens', () => {
+  const files = readdirSync(join(corpus, 'parity'))
+    .sort()
+    .map((name) => join(corpus, 'parity', name));
+  checkGolden('parity_digest.json', reader.digest(files));
+  checkGolden('parity_spans_model_nested.json', reader.spans(files, { model: 'nested-m' }));
+  assert.deepEqual(reader.spans(files, { model: 'nested-m' }), []);
+  const matched = reader.spans(files, { model: 'env-m' });
+  checkGolden('parity_spans_model_empty.json', matched);
+  assert.deepEqual(
+    matched.map((r) => [r.event, r.span]),
+    [['run', '1111111111111111'], ['work', '2222222222222222']]
+  );
+});

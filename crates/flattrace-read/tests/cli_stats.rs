@@ -149,41 +149,30 @@ fn approx_equal(left: &Value, right: &Value, path: &str) -> Result<(), String> {
     }
 }
 
-#[test]
-fn stats_matches_python() {
-    let files = corpus_files();
-    let expected: Value = {
-        let output = Command::new("python3")
-            .args(["-m", "flattrace", "stats", "--json"])
-            .args(&files)
-            .current_dir(repo_root())
-            .output()
-            .expect("python3 -m flattrace stats");
-        // The corpus carries unfinished evidence, so both readers exit 1;
-        // exit codes are asserted separately. The JSON report is on stdout.
-        serde_json::from_slice(&output.stdout).unwrap()
-    };
-    let actual = flattrace_read::stats(&files).unwrap();
-    // The engine's own dominant_spans must descend by total (ties alphabetical).
-    for run in actual.get("runs").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
-        let mut last = f64::INFINITY;
-        for name in run.get("dominant_spans").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
-            let total = name
-                .as_str()
-                .and_then(|n| {
-                    run.get("spans")?.get(n)?.get("total_ms")?.get("total")?.as_f64()
-                })
-                .unwrap_or(0.0);
-            assert!(total <= last + 1e-9, "dominant_spans must descend");
-            last = total;
-        }
-    }
-    let mut actual = actual;
-    normalize_issues(&mut actual);
-    // stats.py orders tied dominant_spans by hash-set order, which varies
-    // with PYTHONHASHSEED; the engine uses alphabetical ties. Normalize
-    // both sides to (-total, name) before comparing.
-    fn normalize_stats(report: &mut Value) {
+fn parity_files() -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(corpus_dir().join("parity"))
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+fn run_stats_json(files: &[String]) -> (Value, bool) {
+    let output = Command::new("python3")
+        .args(["-m", "flattrace", "stats", "--json"])
+        .args(files)
+        .current_dir(repo_root())
+        .output()
+        .expect("python3 -m flattrace stats");
+    let mut expected: Value = serde_json::from_slice(&output.stdout).unwrap();
+    normalize_stats(&mut expected);
+    normalize_issues(&mut expected);
+    (expected, output.status.success())
+}
+
+fn normalize_stats(report: &mut Value) {
         if let Some(runs) = report.get_mut("runs").and_then(|v| v.as_array_mut()) {
             for run in runs.iter_mut() {
                 let totals: std::collections::HashMap<String, f64> = run
@@ -219,11 +208,129 @@ fn stats_matches_python() {
             }
         }
     }
+
+#[test]
+fn stats_matches_python() {
+    let files = corpus_files();
+    let expected: Value = {
+        let output = Command::new("python3")
+            .args(["-m", "flattrace", "stats", "--json"])
+            .args(&files)
+            .current_dir(repo_root())
+            .output()
+            .expect("python3 -m flattrace stats");
+        // The corpus carries unfinished evidence, so both readers exit 1;
+        // exit codes are asserted separately. The JSON report is on stdout.
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+    let actual = flattrace_read::stats(&files).unwrap();
+    // The engine's own dominant_spans must descend by total (ties alphabetical).
+    for run in actual.get("runs").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
+        let mut last = f64::INFINITY;
+        for name in run.get("dominant_spans").and_then(|v| v.as_array()).cloned().unwrap_or_default() {
+            let total = name
+                .as_str()
+                .and_then(|n| {
+                    run.get("spans")?.get(n)?.get("total_ms")?.get("total")?.as_f64()
+                })
+                .unwrap_or(0.0);
+            assert!(total <= last + 1e-9, "dominant_spans must descend");
+            last = total;
+        }
+    }
+    let mut actual = actual;
+    normalize_issues(&mut actual);
     normalize_stats(&mut actual);
     let mut expected = expected;
     normalize_stats(&mut expected);
     normalize_issues(&mut expected);
     approx_equal(&actual, &expected, "stats").unwrap();
+}
+
+#[test]
+fn stats_matches_python_on_parity_corpus() {
+    let files = parity_files();
+    let (expected, python_ok) = run_stats_json(&files);
+    let mut actual = flattrace_read::stats(&files).unwrap();
+    normalize_stats(&mut actual);
+    normalize_issues(&mut actual);
+    approx_equal(&actual, &expected, "stats parity").unwrap();
+    // Unfinished/invalid evidence on both sides: same nonzero exit.
+    let binary = env!("CARGO_BIN_EXE_flattrace-read");
+    let own = Command::new(binary)
+        .arg("stats")
+        .args(&files)
+        .current_dir(corpus_dir())
+        .output()
+        .expect("flattrace-read stats parity");
+    assert!(!own.status.success());
+    assert!(!python_ok);
+}
+
+#[test]
+fn cli_exit_codes_for_invalid_and_missing_inputs() {
+    let binary = env!("CARGO_BIN_EXE_flattrace-read");
+    let dir = std::env::temp_dir().join(format!("flattrace-read-cli-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("broken.jsonl"), "{not json\n").unwrap();
+    // Invalid-only corpus: digest, stats and check all report validation evidence.
+    for args in [
+        vec!["digest".to_string(), dir.join("broken.jsonl").to_string_lossy().into_owned()],
+        vec!["stats".to_string(), dir.join("broken.jsonl").to_string_lossy().into_owned()],
+        vec!["check".to_string(), dir.join("broken.jsonl").to_string_lossy().into_owned()],
+    ] {
+        let output = Command::new(binary)
+            .args(&args)
+            .current_dir(&dir)
+            .output()
+            .expect("flattrace-read invalid corpus");
+        assert_eq!(output.status.code(), Some(1), "{args:?}");
+    }
+    // A missing --events contract is an I/O failure, not a validation issue.
+    let missing = Command::new(binary)
+        .arg("check")
+        .arg(corpus_dir().join("c01-parent.jsonl"))
+        .arg("--events")
+        .arg(dir.join("no-such-contract.json"))
+        .current_dir(&dir)
+        .output()
+        .expect("flattrace-read missing events");
+    assert_eq!(missing.status.code(), Some(2));
+    // A directory with no traces at all is an invocation failure.
+    std::fs::create_dir_all(dir.join("empty")).unwrap();
+    let empty = Command::new(binary)
+        .arg("digest")
+        .arg(dir.join("empty"))
+        .current_dir(&dir)
+        .output()
+        .expect("flattrace-read empty directory");
+    assert_eq!(empty.status.code(), Some(2));
+    // A duplicate copy of a broken file still reports validation evidence.
+    std::fs::create_dir_all(dir.join("dupbad")).unwrap();
+    std::fs::copy(corpus_dir().join("c11-bad.jsonl"), dir.join("dupbad").join("a.jsonl")).unwrap();
+    std::fs::copy(corpus_dir().join("c11-bad.jsonl"), dir.join("dupbad").join("b.jsonl")).unwrap();
+    let dupbad = Command::new(binary)
+        .arg("digest")
+        .arg(dir.join("dupbad"))
+        .current_dir(&dir)
+        .output()
+        .expect("flattrace-read duplicate broken corpus");
+    assert_eq!(dupbad.status.code(), Some(1));
+    let parsed: Value = serde_json::from_slice(&dupbad.stdout).unwrap();
+    assert_eq!(parsed["coverage"]["files"], Value::from(2));
+    assert!(parsed["coverage"]["duplicates_with_issues"].as_i64().unwrap_or(0) >= 1);
+    // Directories expand recursively like `flattrace stats`.
+    let expanded = Command::new(binary)
+        .arg("digest")
+        .arg(corpus_dir().join("closedata"))
+        .current_dir(&dir)
+        .output()
+        .expect("flattrace-read digest directory");
+    assert_eq!(expanded.status.code(), Some(0));
+    let parsed: Value = serde_json::from_slice(&expanded.stdout).unwrap();
+    assert_eq!(parsed["coverage"]["files"], Value::from(1));
+    std::fs::remove_dir_all(&dir).unwrap();
 }
 
 #[test]

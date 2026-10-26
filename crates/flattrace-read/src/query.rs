@@ -25,25 +25,42 @@ fn get_path(data: &Value, dotted: &str) -> Value {
     current.clone()
 }
 
+/// Python-truthiness fallthrough, matching the reference `or` chains:
+/// null, false, 0, "" and empty containers all fall through.
+fn is_truthy(value: &Value) -> bool {
+    match value {
+        Value::Null => false,
+        Value::Bool(hit) => *hit,
+        Value::Number(n) => n.as_f64().map(|v| v != 0.0).unwrap_or(false),
+        Value::String(s) => !s.is_empty(),
+        Value::Array(items) => !items.is_empty(),
+        Value::Object(map) => !map.is_empty(),
+    }
+}
+
 fn model_of(span: &SpanRec, env: &Value) -> Value {
-    for key in ["gen_ai.request.model", "model"] {
-        let value = get_path(&span.data, key);
-        if !value.is_null() {
-            return value;
+    // Literal keys per docs/reader.md, with Python-truthiness fallback order:
+    // span data["gen_ai.request.model"], then data["model"], then run env.
+    for value in [span.data.get("gen_ai.request.model"), span.data.get("model")] {
+        if let Some(value) = value {
+            if is_truthy(value) {
+                return value.clone();
+            }
         }
     }
-    get_path(env, "gen_ai.request.model")
+    match env.get("gen_ai.request.model") {
+        Some(value) if is_truthy(value) => value.clone(),
+        _ => Value::Null,
+    }
 }
 
 fn session_of(span: &SpanRec, header: &Value) -> Value {
-    for key in ["session_id", "session"] {
-        let value = span.data.get(key).cloned().unwrap_or(Value::Null);
-        if !value.is_null() {
-            return value;
-        }
-        let value = header.get(key).cloned().unwrap_or(Value::Null);
-        if !value.is_null() {
-            return value;
+    for value in [span.data.get("session_id"), span.data.get("session"),
+                  header.get("session_id"), header.get("session")] {
+        if let Some(value) = value {
+            if is_truthy(value) {
+                return value.clone();
+            }
         }
     }
     Value::Null
@@ -254,10 +271,14 @@ pub fn coverage(corpus: &Corpus) -> Result<Value, String> {
     let mut complete = 0;
     let mut invalid = 0;
     let mut duplicates = 0;
+    let mut duplicates_with_issues = 0;
     let mut issues = 0;
     for run in &corpus.runs {
         if run.duplicate {
             duplicates += 1;
+            if !run.issues_rendered.is_empty() {
+                duplicates_with_issues += 1;
+            }
             continue;
         }
         runs += 1;
@@ -297,6 +318,7 @@ pub fn coverage(corpus: &Corpus) -> Result<Value, String> {
         "files": corpus.files.len(), "runs": runs,
         "complete_runs": complete, "unfinished_runs": runs - complete,
         "invalid_files": invalid, "duplicates_excluded": duplicates,
+        "duplicates_with_issues": duplicates_with_issues,
         "spans": spans, "spans_unfinished": unfinished_spans,
         "points": points, "issues": issues,
         "statement": statement,

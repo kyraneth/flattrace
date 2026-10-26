@@ -302,3 +302,29 @@ fn spans_runend_matches_golden() {
     );
     assert_golden("spans_runend.json", actual);
 }
+
+fn parity_files() -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(corpus_dir().join("parity"))
+        .unwrap()
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
+
+#[test]
+fn parity_digest_matches_golden() {
+    assert_golden("parity_digest.json", flattrace_read::digest(&parity_files(), None).unwrap());
+}
+
+#[test]
+fn parity_model_filters_match_golden() {
+    let files = parity_files();
+    assert_golden(
+        "parity_spans_model_nested.json",
+        flattrace_read::spans(&files, Some(r#"{"model": "nested-m"}"#)).unwrap(),
+    );
+    let actual = flattrace_read::spans(&files, Some(r#"{"model": "env-m"}"#)).unwrap();
+    assert_golden("parity_spans_model_empty.json", actual);
+}

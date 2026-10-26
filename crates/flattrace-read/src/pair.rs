@@ -231,11 +231,6 @@ impl<'a> FileLoader<'a> {
                 categorized.push(("line".to_string(), format!("line {number}: {detail}")));
                 continue;
             }
-            last = Some((
-                str_field(&row, "event").to_string(),
-                str_field(&row, "state").to_string(),
-                str_field(&row, "span").to_string(),
-            ));
             if first_row.is_none() {
                 first_row = Some(row.clone());
                 let id = (str_field(&row, "trace").to_string(), str_field(&row, "run").to_string());
@@ -243,12 +238,15 @@ impl<'a> FileLoader<'a> {
                 self.seen.insert(id);
                 if str_field(&row, "event") == "run" && str_field(&row, "state") == "start" {
                     root = Some(str_field(&row, "span").to_string());
+                    run_level = row.get("data").and_then(|d| d.get("level"))
+                        .and_then(|v| v.as_i64()).filter(|v| *v >= 0)
+                        .map(|v| v.to_string()).unwrap_or_else(|| "unknown".to_string());
+                } else {
+                    categorized.push(("first valid line must be run start".to_string(),
+                        "first valid line must be run start".to_string()));
                 }
                 run_agent = row.get("data").and_then(|d| d.get("env"))
                     .and_then(|e| e.get("agent.name")).and_then(|v| v.as_str()).map(|s| s.to_string());
-                run_level = row.get("data").and_then(|d| d.get("level"))
-                    .and_then(|v| v.as_i64()).filter(|v| *v >= 0)
-                    .map(|v| v.to_string()).unwrap_or_else(|| "unknown".to_string());
                 run_header = row.get("data").cloned().unwrap_or(Value::Null);
                 run_idx = Some(self.runs.len());
                 self.spans_by_run.push(Vec::new());
@@ -273,6 +271,11 @@ impl<'a> FileLoader<'a> {
                 }
             }
             expected_seq += 1;
+            last = Some((
+                str_field(&row, "event").to_string(),
+                str_field(&row, "state").to_string(),
+                str_field(&row, "span").to_string(),
+            ));
             let data = row.get("data").cloned().unwrap_or(Value::Null);
             let severity = data.get("severity").and_then(|v| v.as_str()).unwrap_or("");
             let count = count_of(&data);
@@ -300,7 +303,7 @@ impl<'a> FileLoader<'a> {
                     categorized.push(("unexpected run start".to_string(),
                         format!("line {number}: unexpected run start")));
                 }
-                if name != "run" && !active.contains_key(parent.as_deref().unwrap_or("")) {
+                if Some(&span) != root.as_ref() && !active.contains_key(parent.as_deref().unwrap_or("")) {
                     categorized.push(("inactive parent".to_string(), format!("line {number}: inactive parent")));
                 }
                 if let Some(owner) = parent.as_deref().and_then(|p| active.get_mut(p)) {
@@ -414,22 +417,20 @@ impl<'a> FileLoader<'a> {
                 });
             }
         };
-        if str_field(&first, "event") != "run" || str_field(&first, "state") != "start" {
-            categorized.push(("first valid line must be run start".to_string(),
-                "first valid line must be run start".to_string()));
-        }
-        let header_ok = first.get("data").and_then(|d| d.as_object()).map(|data| {
-            let argv_ok = data.get("argv").map(|v| {
-                v.as_array().map(|items| items.iter().all(|v| v.is_string())).unwrap_or(false)
+        if root.is_some() {
+            let header_ok = first.get("data").and_then(|d| d.as_object()).map(|data| {
+                let argv_ok = data.get("argv").map(|v| {
+                    v.as_array().map(|items| items.iter().all(|v| v.is_string())).unwrap_or(false)
+                }).unwrap_or(false);
+                let host_ok = data.get("host").map(|v| v.is_string()).unwrap_or(false);
+                let version_ok = data.get("version").and_then(|v| v.as_str())
+                    == first.get("tool_version").and_then(|v| v.as_str());
+                argv_ok && host_ok && version_ok
             }).unwrap_or(false);
-            let host_ok = data.get("host").map(|v| v.is_string()).unwrap_or(false);
-            let version_ok = data.get("version").and_then(|v| v.as_str())
-                == first.get("tool_version").and_then(|v| v.as_str());
-            argv_ok && host_ok && version_ok
-        }).unwrap_or(false);
-        if !header_ok {
-            categorized.push(("run start requires argv, host, version".to_string(),
-                "run start requires argv, host, version".to_string()));
+            if !header_ok {
+                categorized.push(("run start requires argv, host, version".to_string(),
+                    "run start requires argv, host, version".to_string()));
+            }
         }
         let expected_last = root.clone().map(|span| ("run".to_string(), "end".to_string(), span));
         if root.is_none() || last != expected_last {

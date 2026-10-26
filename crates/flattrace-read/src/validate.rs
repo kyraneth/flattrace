@@ -345,6 +345,7 @@ pub fn read_trace(path: &Path) -> io::Result<(Vec<Value>, Vec<String>)> {
     }
     let mut active: HashMap<String, (String, Option<String>)> = HashMap::new();
     let mut seen: HashMap<String, bool> = HashMap::new();
+    let mut order: Vec<String> = Vec::new();
     for row in &rows {
         let span = str_field(row, "span").to_string();
         let state = str_field(row, "state").to_string();
@@ -361,6 +362,9 @@ pub fn read_trace(path: &Path) -> io::Result<(Vec<Value>, Vec<String>)> {
                 issues.push(format!("inactive parent for {span}"));
             }
             active.insert(span.clone(), identity);
+            if !seen.contains_key(&span) {
+                order.push(span.clone());
+            }
             seen.insert(span, true);
         } else if state == "end" {
             if active.get(&span) != Some(&identity) {
@@ -371,15 +375,10 @@ pub fn read_trace(path: &Path) -> io::Result<(Vec<Value>, Vec<String>)> {
             issues.push(format!("point outside active span {span}"));
         }
     }
-    let mut order: Vec<String> = Vec::new();
-    for row in &rows {
-        let span = str_field(row, "span").to_string();
-        if active.contains_key(&span) && !order.contains(&span) {
-            order.push(span);
-        }
-    }
     for span in order {
-        issues.push(format!("unfinished span {span}: missing end"));
+        if active.contains_key(&span) {
+            issues.push(format!("unfinished span {span}: missing end"));
+        }
     }
     Ok((rows, issues))
 }
@@ -393,15 +392,32 @@ pub struct Contract {
     pub events: BTreeMap<String, (String, i64)>,
 }
 
-pub fn read_events(path: &Path) -> Result<Contract, String> {
-    let text = std::fs::read_to_string(path).map_err(|e| e.to_string())?;
-    let contract: Value = serde_json::from_str(&text).map_err(|e| e.to_string())?;
-    let obj = contract.as_object().ok_or_else(|| "event list requires tool and events, with optional commands".to_string())?;
-    let tool = obj.get("tool").and_then(|v| v.as_str()).ok_or_else(|| "event list requires tool and events, with optional commands".to_string())?;
-    let events = obj.get("events").and_then(|v| v.as_object()).ok_or_else(|| "event list requires tool and events, with optional commands".to_string())?;
+/// read_events failures keep their kind: missing/unreadable contract files
+/// are invocation/I-O failures, malformed contracts are validation errors.
+#[derive(Debug)]
+pub enum ReadEventsError {
+    Io(std::io::Error),
+    Invalid(String),
+}
+
+impl std::fmt::Display for ReadEventsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            ReadEventsError::Io(e) => write!(f, "{e}"),
+            ReadEventsError::Invalid(msg) => write!(f, "{msg}"),
+        }
+    }
+}
+
+pub fn read_events(path: &Path) -> Result<Contract, ReadEventsError> {
+    let text = std::fs::read_to_string(path).map_err(ReadEventsError::Io)?;
+    let contract: Value = serde_json::from_str(&text).map_err(|e: serde_json::Error| ReadEventsError::Invalid(e.to_string()))?;
+    let obj = contract.as_object().ok_or_else(|| ReadEventsError::Invalid("event list requires tool and events, with optional commands".to_string()))?;
+    let tool = obj.get("tool").and_then(|v| v.as_str()).ok_or_else(|| ReadEventsError::Invalid("event list requires tool and events, with optional commands".to_string()))?;
+    let events = obj.get("events").and_then(|v| v.as_object()).ok_or_else(|| ReadEventsError::Invalid("event list requires tool and events, with optional commands".to_string()))?;
     if let Some(commands) = obj.get("commands") {
         if !commands.is_object() {
-            return Err("event list requires tool and events, with optional commands".to_string());
+            return Err(ReadEventsError::Invalid("event list requires tool and events, with optional commands".to_string()));
         }
     }
     let mut declarations = BTreeMap::new();
@@ -410,21 +426,21 @@ pub fn read_events(path: &Path) -> Result<Contract, String> {
         let fields = event.get("fields").and_then(|v| v.as_object());
         let fields_ok = fields.map(|f| f.values().all(|v| v.is_string())).unwrap_or(false);
         if !matches!(kind, Some("span") | Some("point")) || !fields_ok {
-            return Err(format!("invalid event declaration {name}"));
+            return Err(ReadEventsError::Invalid(format!("invalid event declaration {name}")));
         }
         let level: i64 = match event.get("level") {
             None => 1,
             Some(Value::Number(n)) => match n.as_u64() {
                 Some(v) if v >= 1 => v as i64,
-                _ => return Err(format!("invalid level for event {name}")),
+                _ => return Err(ReadEventsError::Invalid(format!("invalid level for event {name}"))),
             },
-            _ => return Err(format!("invalid level for event {name}")),
+            _ => return Err(ReadEventsError::Invalid(format!("invalid level for event {name}"))),
         };
         declarations.insert(name.clone(), (kind.unwrap().to_string(), level));
     }
-    let check_names = |names: &Vec<String>, command: &str| -> Result<(), String> {
+    let check_names = |names: &Vec<String>, command: &str| -> Result<(), ReadEventsError> {
         if !names.iter().all(|n| declarations.contains_key(n)) {
-            return Err(format!("invalid required events for {command}"));
+            return Err(ReadEventsError::Invalid(format!("invalid required events for {command}")));
         }
         Ok(())
     };
@@ -434,7 +450,7 @@ pub fn read_events(path: &Path) -> Result<Contract, String> {
             items.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
         }).unwrap_or_default();
         if !names.is_array() || list.len() != names.as_array().unwrap().len() {
-            return Err("invalid required events for required".to_string());
+            return Err(ReadEventsError::Invalid("invalid required events for required".to_string()));
         }
         check_names(&list, "required")?;
         required = list;
@@ -447,7 +463,7 @@ pub fn read_events(path: &Path) -> Result<Contract, String> {
                 items.iter().filter_map(|v| v.as_str().map(|s| s.to_string())).collect()
             }).unwrap_or_default();
             if !names.is_array() || list.len() != names.as_array().unwrap().len() {
-                return Err(format!("invalid required events for {command}"));
+                return Err(ReadEventsError::Invalid(format!("invalid required events for {command}")));
             }
             check_names(&list, command)?;
             table.insert(command.clone(), list);

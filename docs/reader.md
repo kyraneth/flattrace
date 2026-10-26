@@ -13,13 +13,15 @@ together.
 
 ## Inputs
 
-Functions take explicit file paths: plain `.jsonl` and gzip `.jsonl.gz` with
-identical JSONL content after decompression. There is no directory walk and no
-network or index machinery. Files are read in the order given. Runs are
-deduplicated by `(trace, run)`; the first path wins and later copies are listed
-as duplicates: still fully validated, but their duration/error samples are
-excluded. Files with no valid rows are reported as invalid and contribute no
-run. Single-run-per-file `check` semantics are exactly `flattrace.check`;
+Functions take explicit file paths and directories: plain `.jsonl` and
+gzip `.jsonl.gz` with identical JSONL content after decompression.
+Directories expand recursively (sorted `*.jsonl` and `*.jsonl.gz`, never
+following directory links), exactly like `flattrace stats`. There is no
+network or index machinery. Files are read in the order given (expanded
+paths in place, first path wins on duplicates); later copies of a run are
+listed as duplicates: still fully validated, but their duration/error
+samples are excluded. Files with no valid rows are reported as invalid and
+contribute no run. Single-run-per-file `check` semantics are exactly `flattrace.check`;
 corpus analysis never merges divergent copies of one run.
 
 ## Functions
@@ -62,10 +64,13 @@ corpus analysis never merges divergent copies of one run.
 
 `digest`, `group`, `tree`, `compare` and `overlap` outputs all embed
 `coverage`: `{files, runs, complete_runs, unfinished_runs, invalid_files,
-duplicates_excluded, spans, spans_unfinished, points, issues, statement}`.
+duplicates_excluded, duplicates_with_issues, spans, spans_unfinished,
+points, issues, statement}`.
 `statement` is the same counts as one human sentence. The `issues` count
 covers run/pairing/boundary evidence per run; malformed-line details are
 check-level evidence and appear in `check` output, not here.
+`duplicates_with_issues` counts duplicate runs carrying any issue text
+(including check-level detail); duplicate runs never contribute samples.
 
 ## Filters
 
@@ -77,8 +82,8 @@ check-level evidence and appear in `check` output, not here.
 | `outcome` | end-outcome equality; the value `"unfinished"` matches unfinished spans (whose outcome is null, never `"unfinished"` as a string) |
 | `unfinished` | boolean |
 | `agent` | run-start `data.env["agent.name"]` |
-| `model` | span-start `data["gen_ai.request.model"]`, else `data["model"]`, else run-start env `gen_ai.request.model` |
-| `session` | span-start `data.session_id`/`data.session`, else run-start `session_id`/`session` |
+| `model` | span-start `data["gen_ai.request.model"]`, else `data["model"]`, else run-start env `gen_ai.request.model` (first truthy wins; empty values fall through like Python `or`) |
+| `session` | span-start `data.session_id`/`data.session`, else run-start `session_id`/`session` (first truthy wins; empty values fall through like Python `or`) |
 | `error_kind` | any attached error (end or point) with this `kind` |
 | `t_from`, `t_to` | inclusive RFC3339 bounds on `start_t` (compared as timestamps, so `Z` and `+00:00` mix freely) |
 | `data` | object of dotted-path → exact value matched against the span-start payload |

@@ -117,6 +117,27 @@ class ConformanceTests(unittest.TestCase):
                          {"turns": 3, "tokens": 42, "totals": {"took_ms": 40}})
         self.assertEqual(run["children"], ["2222222222222222"])
 
+    def test_parity_corpus(self):
+        files = sorted(os.path.join("parity", p) for p in sorted(
+            os.listdir(os.path.join(CORPUS, "parity"))))
+        self.assertEqual([os.path.basename(p) for p in files],
+                         ["empty.jsonl", "mixed-after-end.jsonl",
+                          "model-empty.jsonl", "model-nested.jsonl",
+                          "nonrun-first.jsonl", "second-run-start.jsonl"])
+        digest = reference.digest(files)
+        self.check_golden("parity_digest.json", digest)
+        coverage = digest["coverage"]
+        self.assertEqual(coverage["files"], 6)
+        self.assertEqual(coverage["invalid_files"], 1)
+        self.assertEqual(reference.spans(files, {"model": "nested-m"}), [])
+        self.check_golden("parity_spans_model_nested.json",
+                          reference.spans(files, {"model": "nested-m"}))
+        matched = reference.spans(files, {"model": "env-m"})
+        self.check_golden("parity_spans_model_empty.json", matched)
+        self.assertEqual([(s["event"], s["span"]) for s in matched],
+                         [("run", "1111111111111111"),
+                          ("work", "2222222222222222")])
+
     def test_real_samples_shape(self):
         real = sorted(str(p) for p in (CORPUS / "real").glob("*.jsonl"))
         self.assertEqual([os.path.basename(p) for p in real],
