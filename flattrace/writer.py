@@ -259,13 +259,14 @@ class Writer:
         self._write(event, "point", span, self.active[span][1], data, **extra)
 
     def end(self, span, outcome, data=None, *, error=None):
+        """End a span and return the took_ms written on its end line."""
         if span == self.root:
             message = "run root can only end through close()"
             if not self.best_effort:
                 raise ValueError(message)
             warn(message, disabled=False)
-            return
-        self._end(span, outcome, data, error=error)
+            return None
+        return self._end(span, outcome, data, error=error)
 
     def _end(self, span, outcome, data=None, *, error=None):
         if not isinstance(outcome, str):
@@ -274,10 +275,11 @@ class Writer:
             raise ValueError("inactive span")
         event, parent, begun = self.active[span]
         extra = {} if error is None else {"error": error}
+        took_ms = (time.perf_counter() - begun) * 1000
         self._write(event, "end", span, parent, data,
-                    took_ms=(time.perf_counter() - begun) * 1000,
-                    outcome=outcome, **extra)
+                    took_ms=took_ms, outcome=outcome, **extra)
         del self.active[span]
+        return took_ms
 
     def traceparent(self, span=None):
         span = self.root if span is None else span

@@ -263,26 +263,31 @@ impl Writer {
         self.emit(event, "point", &span, parent.as_deref(), data, None, error)
     }
     pub fn end(&mut self, span: &str, outcome: &str, data: Value, error: Option<Value>) -> io::Result<()> {
+        self.end_timed(span, outcome, data, error).map(|_| ())
+    }
+    /// Like `end`, returning the took_ms written on the end line
+    /// (`None` when a best-effort root end is refused).
+    pub fn end_timed(&mut self, span: &str, outcome: &str, data: Value, error: Option<Value>) -> io::Result<Option<f64>> {
         if span == self.root {
             let message = "run root can only end through finish()";
             if !self.best_effort { return Err(invalid(message)); }
             warn_text(message);
-            return Ok(());
+            return Ok(None);
         }
-        self.end_span(span, outcome, data, error)
+        self.end_span(span, outcome, data, error).map(Some)
     }
-    fn end_span(&mut self, span: &str, outcome: &str, data: Value, error: Option<Value>) -> io::Result<()> {
+    fn end_span(&mut self, span: &str, outcome: &str, data: Value, error: Option<Value>) -> io::Result<f64> {
         let (event, parent, begun) = self.active.get(span).ok_or_else(|| invalid("inactive span"))?.clone();
-        self.emit(&event, "end", span, parent.as_deref(), data,
-                  Some((outcome, begun.elapsed().as_secs_f64() * 1000.0)), error)?;
+        let took_ms = begun.elapsed().as_secs_f64() * 1000.0;
+        self.emit(&event, "end", span, parent.as_deref(), data, Some((outcome, took_ms)), error)?;
         self.active.remove(span);
-        Ok(())
+        Ok(took_ms)
     }
     pub fn finish(self, outcome: &str) -> io::Result<()> { self.finish_with(outcome, json!({})) }
     /// End the run with a run-end payload (e.g. totals).
     pub fn finish_with(mut self, outcome: &str, data: Value) -> io::Result<()> {
         if self.active.keys().any(|span| span != &self.root) { return Err(invalid("local spans still active")); }
-        self.end_span(&self.root.clone(), outcome, data, None)
+        self.end_span(&self.root.clone(), outcome, data, None).map(|_| ())
     }
     // Dropping a writer closes the file without inventing an end.
 }
@@ -553,6 +558,18 @@ mod tests {
             assert_eq!(child["parent"], w.root);
         }
         w.finish("ok").unwrap();
+    }
+    #[test]
+    fn end_timed_returns_written_took_ms() {
+        let path = target();
+        let mut w = Writer::create(&path, "test", "1", vec![], "test-host").unwrap();
+        let span = w.start("tool", json!({}), None).unwrap();
+        let took = w.end_timed(&span, "ok", json!({}), None).unwrap().unwrap();
+        w.finish("ok").unwrap();
+        let text = std::fs::read_to_string(&path).unwrap();
+        let row: Value = serde_json::from_str(text.lines().nth(2).unwrap()).unwrap();
+        assert_eq!(row["took_ms"].as_f64().unwrap(), took);
+        std::fs::remove_file(path).unwrap();
     }
     #[test]
     fn finish_with_carries_run_end_data() {
