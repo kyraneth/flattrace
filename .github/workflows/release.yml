@@ -67,7 +67,7 @@ jobs:
           docker run --rm -v "$PWD:/io" -w /io quay.io/pypa/manylinux2014_x86_64 \
             bash -lc 'curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain 1.94.1 && export PATH="$HOME/.cargo/bin:$PATH" && /opt/python/cp311-cp311/bin/python -m pip install --no-cache-dir "maturin==1.15.0" && /opt/python/cp311-cp311/bin/python -m maturin build --locked --release --compatibility manylinux2014 --out dist/abi3'
           ls dist/abi3/*.whl | tee "$RUNNER_TEMP/abi3-linux.txt"
-          test "$(wc -l < "$RUNNER_TEMP/abi3-linux.txt")" = 1
+          test "$(wc -l < "$RUNNER_TEMP/abi3-linux.txt")" -eq 1
 
       - name: Upload abi3 Linux wheel
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -103,7 +103,7 @@ jobs:
           umask 002
           python -m maturin build --locked --release --out dist/abi3
           ls dist/abi3/*.whl | tee "$RUNNER_TEMP/abi3-macos.txt"
-          test "$(wc -l < "$RUNNER_TEMP/abi3-macos.txt")" = 1
+          test "$(wc -l < "$RUNNER_TEMP/abi3-macos.txt")" -eq 1
 
       - name: Upload abi3 macOS wheel
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -208,7 +208,7 @@ jobs:
           rustup toolchain install 1.94.1 --profile minimal
           cargo +1.94.1 build --release --locked --manifest-path crates/flattrace-read/Cargo.toml --bin flattrace-read
           mkdir -p dist/cli
-          cp target/release/flattrace-read dist/cli/flattrace-read-linux-x64
+          cp crates/flattrace-read/target/release/flattrace-read dist/cli/flattrace-read-linux-x64
           ./dist/cli/flattrace-read-linux-x64 --help
 
       - name: Upload linux-x64 CLI binary
@@ -235,7 +235,7 @@ jobs:
           rustup toolchain install 1.94.1 --profile minimal
           cargo +1.94.1 build --release --locked --manifest-path crates/flattrace-read/Cargo.toml --bin flattrace-read
           mkdir -p dist/cli
-          cp target/release/flattrace-read dist/cli/flattrace-read-darwin-arm64
+          cp crates/flattrace-read/target/release/flattrace-read dist/cli/flattrace-read-darwin-arm64
           ./dist/cli/flattrace-read-darwin-arm64 --help
 
       - name: Upload darwin-arm64 CLI binary

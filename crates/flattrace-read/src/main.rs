@@ -78,6 +78,10 @@ fn parse(argv: &[String]) -> Result<Args, String> {
 
 fn main() -> ExitCode {
     let argv: Vec<String> = std::env::args().skip(1).collect();
+    if matches!(argv.first().map(String::as_str), Some("--help" | "-h" | "help")) {
+        println!("{}", usage());
+        return ExitCode::SUCCESS;
+    }
     let args = match parse(&argv) {
         Ok(args) => args,
         Err(message) => {

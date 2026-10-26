@@ -442,3 +442,13 @@ fn cli_check_digest_tree_group_overlap() {
         .clone();
     assert_eq!(run["end_data"]["turns"], Value::from(3));
 }
+
+#[test]
+fn help_prints_usage_and_succeeds() {
+    for flag in ["--help", "-h", "help"] {
+        let out = std::process::Command::new(env!("CARGO_BIN_EXE_flattrace-read"))
+            .arg(flag).output().unwrap();
+        assert!(out.status.success(), "{flag} exit {:?}", out.status);
+        assert!(String::from_utf8_lossy(&out.stdout).starts_with("usage: flattrace-read"));
+    }
+}
