@@ -336,9 +336,22 @@ jobs:
           rustup toolchain install 1.94.1 --profile minimal
           python -m pip install --no-cache-dir "maturin==1.15.0"
 
+      - name: Collect built artifacts
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd43ac5ef33c # v8.0.2
+        with:
+          path: collected
+          merge-multiple: false
+
       - name: Run all test suites
+        env:
+          # The engine-golden binding tests fail instead of skipping here.
+          FLATTRACE_REQUIRE_ENGINE: '1'
         run: |
           umask 002
+          # maturin develop needs a virtualenv; the engine is built into the source tree.
+          python -m venv "$RUNNER_TEMP/venv"
+          source "$RUNNER_TEMP/venv/bin/activate"
+          python -m pip install --no-cache-dir "maturin==1.15.0"
           python -m maturin develop --locked --release --manifest-path crates/flattrace-py/Cargo.toml
           python -m unittest -v
           python -m unittest discover -s bench -p 'test_*.py' -v
@@ -347,14 +360,8 @@ jobs:
           cargo +1.94.1 test --manifest-path bench/rust/Cargo.toml --locked
           npm --prefix typescript ci --ignore-scripts
           mkdir -p typescript/native
-          cp "$RUNNER_TEMP/node-linux/flattrace-reader.linux-x64-gnu.node" typescript/native/
+          cp collected/node-linux/flattrace-reader.linux-x64-gnu.node typescript/native/
           npm --prefix typescript test
-
-      - name: Collect built artifacts
-        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd43ac5ef33c # v8.0.2
-        with:
-          path: collected
-          merge-multiple: false
 
       - name: Build pure fallback wheel and npm tarball
         run: |
@@ -385,7 +392,15 @@ jobs:
           out.append('\n[tool.uv.build-backend]\nmodule-root = ""\nmodule-name = "flattrace"\n')
           Path('pyproject.toml').write_text(''.join(out))
           PY
+          # The test step built the engine into the source tree; it must not
+          # reach the pure wheel.
+          rm -f flattrace/_flattrace_read*.so flattrace/_flattrace_read*.pyd
           uv build --python 3.13.11 --no-sources --wheel --out-dir dist/python
+          pure=(dist/python/*-py3-none-any.whl)
+          [[ ${#pure[@]} == 1 ]]
+          if python -m zipfile -l "${pure[0]}" | grep -E '\.(so|pyd|dylib)[[:space:]]'; then
+            echo 'pure wheel contains a native binary' >&2; exit 1
+          fi
           git checkout -- pyproject.toml
           npm --prefix typescript run build
           mkdir -p dist/npm

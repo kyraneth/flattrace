@@ -18,6 +18,10 @@ try:
 except ImportError:
     ENGINE = False
 
+if os.environ.get("FLATTRACE_REQUIRE_ENGINE") == "1" and not ENGINE:
+    # Release gate: a missing engine must fail the suite, never skip it.
+    raise ImportError("FLATTRACE_REQUIRE_ENGINE=1 but flattrace._flattrace_read is not importable")
+
 needs_engine = unittest.skipUnless(ENGINE, "reader engine not installed")
 
 
