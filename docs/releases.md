@@ -25,19 +25,22 @@ material that must stay private is kept off its `main` branch.
    `SHA256SUMS` with the independently checked local build. This target cannot
    publish and does not receive OIDC permission.
 3. Obtain explicit approval for the source commit, registry and exact artifact
-   hashes. Dispatch the same `ref` with `target: pypi`, `npm` or `cli`, supplying
-   the reviewed hashes in the inputs below. The workflow rebuilds, then each
-   publish job independently recomputes hashes of its downloaded files. Missing,
-   malformed or different hashes fail before the publishing client requests an
-   OIDC identity or uploads anything. Hashes in the downloaded manifest alone are
-   not treated as approval.
+   hashes. Dispatch with `target: pypi`, `npm` or `cli`, the same `ref`, the
+   reviewed build-only run as `build_run_id`, and the reviewed hashes below.
+   Publish targets never rebuild (native wheels are not byte-reproducible
+   across runs): the publish job checks that the build run is a successful
+   run of this workflow, downloads its `release-distributions` artifact,
+   checks `source-commit.txt` against `ref`, and recomputes every hash.
+   Missing, malformed or different values fail before the publishing client
+   requests an OIDC identity or uploads anything. Hashes in the downloaded
+   manifest alone are not treated as approval.
 
 | Target | Required approval inputs |
 | --- | --- |
 | `build` | None |
-| `pypi` | `expected_abi3_linux_sha256`, `expected_abi3_macos_sha256`, `expected_pure_sha256` |
-| `npm` | `expected_tgz_sha256` |
-| `cli` | `expected_cli_linux_sha256`, `expected_cli_macos_sha256` |
+| `pypi` | `build_run_id`, `expected_abi3_linux_sha256`, `expected_abi3_macos_sha256`, `expected_pure_sha256` |
+| `npm` | `build_run_id`, `expected_tgz_sha256` |
+| `cli` | `build_run_id`, `expected_cli_linux_sha256`, `expected_cli_macos_sha256` |
 
 Hashes must be exactly 64 lowercase hexadecimal characters. These requirements
 are conditional: GitHub's dispatch form cannot make an input required only for
