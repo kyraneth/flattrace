@@ -1,0 +1,13 @@
+{
+  "name": "flattrace-site",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "build": "python3 build.py && node render.mjs"
+  },
+  "devDependencies": {
+    "marked": "18.1.2",
+    "pele": "1.12.0"
+  }
+}

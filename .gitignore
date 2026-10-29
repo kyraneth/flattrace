@@ -12,5 +12,9 @@ flattrace/_flattrace_read*.so
 /typescript/native/
 /typescript/README.md
 /typescript/LICENSE
+/typescript/schema/
 /typescript/*.tgz
 .pytest_cache/
+/site/out/
+/site/dist/
+/site/node_modules/

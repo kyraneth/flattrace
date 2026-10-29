@@ -7,7 +7,7 @@
 use std::process::ExitCode;
 
 fn usage() -> String {
-    "usage: flattrace-read check FILES... [--events FILE] [--command ID]\n       flattrace-read stats FILES... [--json|--text]\n       flattrace-read digest FILES... [--filter JSON] [--json|--text]\n       flattrace-read spans FILES... [--filter JSON] [--json|--text]\n       flattrace-read tree --trace ID FILES... [--json|--text]\n       flattrace-read compare --a A [--a ...] --b B [--b ...] [--filter JSON] [--json|--text]\n       flattrace-read overlap --window EVENT FILES... [--filter JSON] [--json|--text]\n       flattrace-read group --by a,b [--metrics m,n] FILES... [--filter JSON] [--json|--text]".to_string()
+    "usage: flattrace-read check FILES... [--events FILE]... [--command ID]\n       flattrace-read stats FILES... [--json|--text]\n       flattrace-read digest FILES... [--filter JSON] [--json|--text]\n       flattrace-read spans FILES... [--filter JSON] [--json|--text]\n       flattrace-read tree --trace ID FILES... [--json|--text]\n       flattrace-read compare --a A [--a ...] --b B [--b ...] [--filter JSON] [--json|--text]\n       flattrace-read overlap --window EVENT FILES... [--filter JSON] [--json|--text]\n       flattrace-read group --by a,b [--metrics m,n] FILES... [--filter JSON] [--json|--text]".to_string()
 }
 
 struct Args {
@@ -15,7 +15,7 @@ struct Args {
     files: Vec<String>,
     a_files: Vec<String>,
     b_files: Vec<String>,
-    events: Option<String>,
+    events: Vec<String>,
     command_id: Option<String>,
     filter: Option<String>,
     by: Vec<String>,
@@ -28,7 +28,7 @@ struct Args {
 fn parse(argv: &[String]) -> Result<Args, String> {
     let mut args = Args {
         command: String::new(), files: Vec::new(), a_files: Vec::new(), b_files: Vec::new(),
-        events: None, command_id: None, filter: None, by: Vec::new(),
+        events: Vec::new(), command_id: None, filter: None, by: Vec::new(),
         metrics: None, trace: None, window: None, text: false,
     };
     let mut iter = argv.iter();
@@ -43,7 +43,7 @@ fn parse(argv: &[String]) -> Result<Args, String> {
     while let Some(token) = tokens.pop() {
         if let Some(flag) = pending.take() {
             match flag.as_str() {
-                "--events" => args.events = Some(token),
+                "--events" => args.events.push(token),
                 "--command" => args.command_id = Some(token),
                 "--filter" => args.filter = Some(token),
                 "--metrics" => args.metrics = Some(token),
@@ -57,8 +57,7 @@ fn parse(argv: &[String]) -> Result<Args, String> {
         match token.as_str() {
             "--events" | "--command" | "--filter" | "--by" | "--metrics" | "--trace" | "--window" => {
                 pending = Some(token);
-            }
-            "--text" => args.text = true,
+            }            "--text" => args.text = true,
             "--json" => args.text = false,
             "--a" => side = 1,
             "--b" => side = 2,
@@ -127,8 +126,14 @@ fn text_for(command: &str, value: &serde_json::Value) -> String {
         "check" => {
             for file in value.as_array().cloned().unwrap_or_default() {
                 let issues = file.get("issues").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+                let notices = file.get("notices").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+                let notes: Vec<&str> = notices.iter().filter_map(|v| v.as_str()).collect();
                 if issues.is_empty() {
-                    lines.push(format!("{}: {} valid events", file["file"].as_str().unwrap_or("?"), file["rows"].as_i64().unwrap_or(0)));
+                    let mut line = format!("{}: {} valid events", file["file"].as_str().unwrap_or("?"), file["rows"].as_i64().unwrap_or(0));
+                    if !notes.is_empty() {
+                        line.push_str(&format!(" ({})", notes.join("; ")));
+                    }
+                    lines.push(line);
                 } else {
                     lines.push(format!("{}: {}", file["file"].as_str().unwrap_or("?"),
                         issues.iter().filter_map(|v| v.as_str()).collect::<Vec<_>>().join("; ")));
@@ -235,7 +240,7 @@ fn run(args: &Args) -> Result<u8, (u8, String)> {
             if args.files.is_empty() {
                 return Err((2, "check needs input files".to_string()));
             }
-            flattrace_read::check(&args.files, args.events.as_deref(), args.command_id.as_deref())?
+            flattrace_read::check(&args.files, &args.events, args.command_id.as_deref())?
         }
         "stats" => {
             if args.files.is_empty() {

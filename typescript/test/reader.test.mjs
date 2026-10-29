@@ -115,7 +115,28 @@ test('check matches golden', () => {
 });
 
 test('check --events matches golden', () => {
-  checkGolden('check_events.json', reader.check([join(corpus, 'c01-parent.jsonl')], agentEvents));
+  checkGolden('check_events.json', reader.check([join(corpus, 'c01-parent.jsonl')], [agentEvents]));
+});
+
+test('check composition matches golden', () => {
+  const comp = join(root, 'tests', 'conformance', 'composition');
+  const cases = JSON.parse(readFileSync(join(comp, 'cases.json'), 'utf8')).cases;
+  const actual = cases.map((entry) => {
+    // String concat, not join: a case may name a vocabulary outside the
+    // composition directory (a relative .. path), and join would resolve
+    // it while the Python and Rust harnesses keep it verbatim.
+    const events = entry.events.map((name) => comp + '/' + name);
+    const [result] = reader.check([join(comp, entry.run)], events, entry.command);
+    const strip = (text) => text.split(comp + '/').join('');
+    return {
+      ...result,
+      file: entry.run,
+      events: [...entry.events],
+      issues: result.issues.map(strip),
+      notices: result.notices.map(strip),
+    };
+  });
+  checkGolden('check_composition.json', actual);
 });
 
 test('spans match goldens', () => {

@@ -34,7 +34,7 @@ class GzipTests(unittest.TestCase):
         packed = self.plain.with_suffix(".jsonl.gz")
         whole = gzip.compress(self.raw, compresslevel=6)
         packed.write_bytes(whole[: len(whole) // 2])
-        rows, issues = read_trace(packed)
+        rows, issues, _ = read_trace(packed)
         self.assertTrue(any("gzip" in issue or "incomplete" in issue for issue in issues), issues)
 
 

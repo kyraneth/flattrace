@@ -1,0 +1,20 @@
+{
+  "commands": {
+    "capture": [
+      "a.fetch"
+    ]
+  },
+  "events": {
+    "a.fetch": {
+      "fields": {
+        "source": "fetch source locator"
+      },
+      "kind": "point"
+    },
+    "run": {
+      "fields": {},
+      "kind": "span"
+    }
+  },
+  "tool": "cmda"
+}

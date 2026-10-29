@@ -1,0 +1,48 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""Print the public-tree export selection, one relative path per line.
+
+The selection is the allowlist for GitHub publication: every git-tracked
+file except internal/ (private development guidance, excluded from export
+without transforms). No content transforms are applied here; reviewers scan
+exactly these bytes with scripts/check-public-tree before publishing.
+"""
+import subprocess
+import sys
+from pathlib import Path
+
+
+def selection(root):
+    out = subprocess.run(["git", "-C", str(root), "ls-files", "-z"],
+                         capture_output=True, check=True)
+    paths = out.stdout.decode("utf-8").split("\0")
+    selected = sorted(p for p in paths if p and not p.startswith("internal/"))
+    for path in selected:
+        if "\n" in path:
+            raise ValueError(f"newline in tracked path {path!r}")
+    return selected
+
+
+def main(argv):
+    root = Path.cwd()
+    args = list(argv)
+    while args and args[0] == "--root":
+        args.pop(0)
+        if not args:
+            print("missing value for --root", file=sys.stderr)
+            return 2
+        root = Path(args.pop(0))
+    if args:
+        print(f"unexpected arguments {args!r}", file=sys.stderr)
+        return 2
+    try:
+        for path in selection(root):
+            print(path)
+    except (subprocess.CalledProcessError, ValueError) as exc:
+        print(f"scripts/export-manifest: {exc}", file=sys.stderr)
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

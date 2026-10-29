@@ -308,15 +308,8 @@ jobs:
           persist-credentials: false
 
       - name: Record exact source and commit timestamp
-        env:
-          RELEASE_TARGET: ${{ inputs.target }}
-          WORKFLOW_SHA: ${{ github.sha }}
         run: |
           umask 002
-          # npm provenance reports the workflow commit as the source commit.
-          if [[ "$RELEASE_TARGET" == npm ]]; then
-            [[ "$(git rev-parse HEAD)" == "$WORKFLOW_SHA" ]]
-          fi
           printf 'SOURCE_DATE_EPOCH=%s\n' "$(git show -s --format=%ct HEAD)" >> "$GITHUB_ENV"
           printf 'Source commit: %s\n' "$(git rev-parse HEAD)"
           git rev-parse HEAD > "$RUNNER_TEMP/source-commit.txt"
@@ -534,10 +527,14 @@ jobs:
           github-token: ${{ github.token }}
           path: dist
 
-      - name: Check the artifact was built from the release ref
+      - name: Check npm source and provenance commits
+        env:
+          WORKFLOW_SHA: ${{ github.sha }}
         run: |
           umask 002
           [[ "$(cat dist/source-commit.txt)" == "$(cat "$RUNNER_TEMP/release-commit.txt")" ]]
+          # npm provenance identifies the publishing workflow commit as source.
+          [[ "$(cat dist/source-commit.txt)" == "$WORKFLOW_SHA" ]]
 
       - name: Verify approved npm bytes before OIDC or upload
         env:

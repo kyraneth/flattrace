@@ -256,7 +256,7 @@ def load_corpus(paths):
     errors, warnings = {}, {}
     seen_identities = set()
     for path in paths:
-        rows, file_issues = read_trace(str(path))
+        rows, file_issues, _ = read_trace(str(path))
         record = {"file": str(path), "rows": len(rows), "issues": file_issues}
         files.append(record)
         if not rows:
@@ -436,16 +436,23 @@ def error_records_of(span):
     return records
 
 
-def check(paths, events_path=None, command=None):
-    contract = read_events(events_path) if events_path else None
+def check(paths, events_paths=None, command=None):
+    if events_paths is None:
+        events_paths = []
+    elif isinstance(events_paths, (str, Path)):
+        events_paths = [events_paths]
+    contracts = [read_events(path) for path in events_paths]
     result = []
     for path in paths:
-        rows, file_issues = read_trace(str(path))
+        rows, file_issues, file_notices = read_trace(str(path))
         issues = list(file_issues)
-        if contract is not None:
-            issues.extend(check_events(rows, contract, command))
+        notices = list(file_notices)
+        if contracts:
+            extra, extra_notices = check_events(rows, contracts, command)
+            issues.extend(extra)
+            notices.extend(extra_notices)
         result.append({"file": str(path), "rows": len(rows),
-                       "issues": issues})
+                       "issues": issues, "notices": notices})
     return result
 
 

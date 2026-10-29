@@ -45,7 +45,7 @@ class LevelTests(unittest.TestCase):
 
     def rows(self):
         (path,) = self.dir.glob("*.jsonl")
-        rows, issues = read_trace(path)
+        rows, issues, _ = read_trace(path)
         self.assertEqual(issues, [])
         return rows
 
@@ -77,13 +77,14 @@ class LevelTests(unittest.TestCase):
 
     def test_check_flags_debug_event_in_level_one_run(self):
         self.run_writer("1", redraw=True)
-        issues = check_events(self.rows(), CONTRACT)
+        issues, _ = check_events(self.rows(), [CONTRACT])
         self.assertIn("level 2 event redraw in level 1 run", issues)
         self.assertNotIn("missing required event redraw for None", issues)
+        self.assertNotIn("missing required event redraw for run", issues)
 
     def test_check_accepts_debug_event_in_level_two_run(self):
         self.run_writer("2", redraw=True)
-        self.assertEqual(check_events(self.rows(), CONTRACT), [])
+        self.assertEqual(check_events(self.rows(), [CONTRACT])[0], [])
 
 
 if __name__ == "__main__":

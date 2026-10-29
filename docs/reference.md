@@ -199,16 +199,37 @@ flattrace export TRACE.jsonl CHILD.jsonl --out reviewed-share
 ```sh
 python3 -m flattrace check TRACE.jsonl
 python3 -m flattrace check --events TOOL/flattrace-events.json TRACE.jsonl
+# One run, several owners: repeat --events, one file per vocabulary.
+python3 -m flattrace check --events RECORDER/flattrace-events.json \
+  --events PLUGIN/flattrace-events.json MIXED.jsonl
 # Legacy command traces can select coverage without adding a data.command field:
 python3 -m flattrace check --events TOOL/flattrace-events.json --command summary OLD.jsonl
 python3 -m flattrace export TRACE.jsonl CHILD.jsonl --out shared --path scene.blend
 ```
 
 The [JSON Schema](../schema/event.schema.json) checks only the envelope; the checker
-also pairs spans and validates run boundaries. With `--events`, it checks the
-tool-owned command's required events (or a commandless contract's `required`
-list) and rejects undeclared names/kinds **per run**, not satisfied by another
-file. Every event file must declare `run` as a `span`. Counters expose removed
+also pairs spans and validates run boundaries. With `--events`, it checks each
+owner's required events and command rules (or a commandless contract's
+`required` list) and rejects undeclared names/kinds **per run**, not satisfied
+by another run. Every event file must declare `run` as a `span`. The reserved
+`run` declaration that composed vocabularies copy is
+[../schema/run-declaration.json](../schema/run-declaration.json):
+
+```json
+{
+  "kind": "span",
+  "fields": {}
+}
+```
+
+Owner-specific measurement prose belongs on the events that own those
+measurements, never in that shared block. The cross-tool conventions
+(`annotate`, `annotation`, `verdict`, `action`, `changes`) are declared
+in [schema/conventions-events.json](../schema/conventions-events.json)
+(tool `flattrace-conventions`), which copies the reserved `run`
+declaration above: vocabularies use those names only with the
+convention's meaning and never redefine them, so composition never sees
+conflicting convention definitions. Counters expose removed
 interior lines and reordering when sequences become discontinuous; they do not
 prove durability, detect every lost suffix or order different processes.
 A sink failure disables the environment writer rather than recovering missing
@@ -216,7 +237,36 @@ writes. Existing v1 traces remain accepted without seq/pid/new data fields,
 including commandless event contracts
 or command coverage selected explicitly with `--command`. Tool tests exercise their operations and
 branches with this command. Payload field descriptions are documentation, not
-an invented schema engine.
+an invented schema engine. Writers emit only valid Unicode scalar strings:
+lone surrogates are replaced with U+FFFD plus a `data.notes` entry (valid
+surrogate pairs stay their character; colliding keys keep the first with a
+note). Legacy lines carrying lone-surrogate escapes still parse, and every
+checker reports the same warning-level notice
+(`line N: lone surrogate escape`) instead of dropping the line.
+
+### Composition truth table
+
+One run file can carry events from several owners. The checker validates the
+run against the union of the supplied vocabulary files, deterministically, so
+the Python, Rust, CLI and Node checkers agree. The run-start manifest is the
+`data.vocabularies` list `[{tool, version, sha256}]` the recorder writes for
+the vocabularies actually registered before the writer opened; `sha256` is the
+SHA-256 of the exact file bytes parsed, and `version` is descriptive metadata.
+
+| Case | Ruling |
+|---|---|
+| Run declares `data.vocabularies` | Only the listed vocabularies may declare this run's events. A listed entry whose file is missing or has a different hash is an error; a supplied file that is not listed fails and is named, and never widens the allowed set. Matching pairs with different `tool` names are an error. |
+| Hash | SHA-256 of the exact file bytes that were parsed. No canonicalization. A recorder registers a vocabulary by file, not as an in-memory object. |
+| `version` | Descriptive only; the vocabulary file itself has no version field. The hash is the check. |
+| Byte-identical files | Deduplicated by hash before the owner check. Distinct files claiming the same `tool` are an error naming both. |
+| Event equality | Parsed-definition equality of the declaration object: object key order does not count, array order does, field descriptions count. A different definition of the same name is an error naming both files. |
+| `run` | Every file declares `run` as a span. Composed files agree on it by copying the reserved declaration above; any differing definitions collide like any other event. |
+| One file / no manifest | Today's behaviour, including envelope `tool` == vocabulary `tool`. A command contract still needs a selection before per-row validation runs. |
+| Manifest present | Composition mode even with one matched file: the envelope `tool` is the writing program and need not equal any vocabulary `tool`. |
+| No manifest, several files | The check composes the files it was given. Lack of fingerprints is unverified provenance, reported as a notice (`unverified provenance: run has no data.vocabularies`), not a failure and not invented provenance. |
+| Required and commands | Scoped to the owning vocabulary. A requirement with no command applies to that vocabulary's own events. A file with commands imposes nothing when the run's command is another owner's; a command ID in two files is an error; a command no composed file declares is undeclared. |
+| Malformed manifest | A present `data.vocabularies` that is not a list of `{tool, sha256}` entries fails (`invalid data.vocabularies in run start`). |
+| Notices | Non-failing warnings reported beside issues: unverified provenance and legacy lone-surrogate escapes. Check exit codes ignore them. |
 
 Local detail includes paths/hosts, **never credentials**. Export is the one
 redaction route for report-a-bug and any per-tool opt-in upload. It discovers

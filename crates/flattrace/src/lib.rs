@@ -283,11 +283,16 @@ impl Writer {
         self.active.remove(span);
         Ok(took_ms)
     }
+    /// Refuse close while local spans are active, keeping the writer usable;
+    /// on success the run is closed like `finish_with`.
+    pub fn try_finish(&mut self, outcome: &str, data: Value) -> io::Result<()> {
+        if self.active.keys().any(|span| span != &self.root) { return Err(invalid("local spans still active")); }
+        self.end_span(&self.root.clone(), outcome, data, None).map(|_| ())
+    }
     pub fn finish(self, outcome: &str) -> io::Result<()> { self.finish_with(outcome, json!({})) }
     /// End the run with a run-end payload (e.g. totals).
     pub fn finish_with(mut self, outcome: &str, data: Value) -> io::Result<()> {
-        if self.active.keys().any(|span| span != &self.root) { return Err(invalid("local spans still active")); }
-        self.end_span(&self.root.clone(), outcome, data, None).map(|_| ())
+        self.try_finish(outcome, data)
     }
     // Dropping a writer closes the file without inventing an end.
 }
@@ -349,16 +354,28 @@ mod tests {
         std::fs::remove_file(path).unwrap();
     }
     #[test]
-    fn surrogate_values_cannot_enter_rust_strings() {
-        // Rust strings contain Unicode scalar values; lone surrogates have no representation.
+    fn unicode_entry_paths() {
+        // The public API accepts &str/Value, not UTF-16: invalid scalar
+        // strings and keys are rejected before they can reach the writer.
         assert!(char::from_u32(0xd800).is_none());
-        assert!(serde_json::from_str::<Value>(r#"{"value":"\ud800"}"#).is_err());
+        assert!(String::from_utf16(&[0xd800]).is_err());
+        for raw in [r#"{"value":"\ud800"}"#, r#""event\ud800""#,
+                    r#"{"\ud800":"first","�":"second"}"#] {
+            assert!(serde_json::from_str::<Value>(raw).is_err());
+        }
         let path = target();
-        let mut w = Writer::create(&path, "synthetic", "1", vec![], "synthetic").unwrap();
-        w.point("unicode", json!({"value":String::from_utf16_lossy(&[0xd800])}), None, None).unwrap();
+        let mut w = Writer::create(&path, "synthetic😀", "1", vec![], "synthetic").unwrap();
+        let paired: Value = serde_json::from_str(r#"{"value":"\ud83d\ude00"}"#).unwrap();
+        w.point("pair😀", paired, None, None).unwrap();
+        let span = w.start("astral😀", json!({"value":"😀"}), None).unwrap();
+        w.end(&span, "ok", json!({}), None).unwrap();
         w.finish("ok").unwrap();
         let rows: Vec<Value> = std::fs::read_to_string(&path).unwrap().lines().map(|s| serde_json::from_str(s).unwrap()).collect();
-        assert_eq!(rows[1]["data"]["value"], "\u{FFFD}");
+        assert_eq!(rows[0]["tool"], "synthetic😀");
+        for row in &rows[1..3] {
+            assert_eq!(row["data"], json!({"value":"😀"}));
+            assert!(row["event"].as_str().unwrap().ends_with('😀'));
+        }
         std::fs::remove_file(path).unwrap();
     }
     #[test]
@@ -396,6 +413,25 @@ mod tests {
             .current_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("../.."))
             .output().unwrap();
         assert!(checked.status.success(), "{}", String::from_utf8_lossy(&checked.stdout));
+        std::fs::remove_file(path).unwrap();
+    }
+    #[test]
+    fn try_finish_recovers_after_refused_close() {
+        // Mirrors the Python/TypeScript refused-close recovery: a refused
+        // close keeps the writer usable, so ending the child then closing
+        // succeeds. The consuming finish_with delegates to try_finish.
+        let path = target();
+        let mut w = Writer::create(&path, "test", "1", vec![], "host").unwrap();
+        let child = w.start("work", json!({}), None).unwrap();
+        assert!(w.try_finish("ok", json!({})).is_err());
+        w.end(&child, "ok", json!({}), None).unwrap();
+        w.try_finish("ok", json!({})).unwrap();
+        let rows: Vec<Value> = std::fs::read_to_string(&path).unwrap()
+            .lines().map(|line| serde_json::from_str(line).unwrap()).collect();
+        assert_eq!(rows.len(), 4);
+        assert_eq!(rows[3]["event"], "run");
+        assert_eq!(rows[3]["state"], "end");
+        assert_eq!(rows[3]["outcome"], "ok");
         std::fs::remove_file(path).unwrap();
     }
     #[test]

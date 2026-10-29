@@ -26,7 +26,7 @@ class AuditTests(unittest.TestCase):
         os.environ.pop("FLATTRACE_LEVEL", None)
 
     def checked(self):
-        rows, issues = read_trace(self.path)
+        rows, issues, _ = read_trace(self.path)
         self.assertEqual(issues, [])
         return rows
 
@@ -72,8 +72,10 @@ class AuditTests(unittest.TestCase):
         writer.close()
         rows = self.checked()
         text = rows[1]["data"]["text"]
-        self.assertEqual(len(text), len(surrogates))
-        self.assertTrue(all(char == "\ufffd" or 0xD800 <= ord(char) < 0xE000 for char in text))
+        # The boundary between the two halves is the valid DBFF DC00 pair.
+        # Every other code unit is lone; that pair becomes scalar U+10FC00.
+        self.assertEqual(text, "\ufffd" * 1023 + "\U0010fc00" + "\ufffd" * 1023)
+        self.assertFalse(any(0xD800 <= ord(char) < 0xE000 for char in text))
         self.assertEqual(rows[2]["event"], "continued")
 
     def test_only_close_can_end_root(self):
@@ -159,6 +161,6 @@ class AuditTests(unittest.TestCase):
                 path = Path(self.temp.name) / (vector["name"] + ".jsonl")
                 writer = Writer(path, "synthetic", "1", argv=vector["argv"])
                 writer.close()
-                rows, issues = read_trace(path)
+                rows, issues, _ = read_trace(path)
                 self.assertEqual(issues, [])
                 self.assertEqual(rows[0]["data"]["argv"], vector["expected"])

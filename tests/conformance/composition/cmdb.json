@@ -1,0 +1,20 @@
+{
+  "commands": {
+    "render": [
+      "b.tile"
+    ]
+  },
+  "events": {
+    "b.tile": {
+      "fields": {
+        "tile": "render tile identity"
+      },
+      "kind": "point"
+    },
+    "run": {
+      "fields": {},
+      "kind": "span"
+    }
+  },
+  "tool": "cmdb"
+}

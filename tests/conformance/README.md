@@ -19,7 +19,7 @@
   verdict points for `compare`.
 - `c10-archive.jsonl.gz` — gzip member.
 - `c11-bad.jsonl` — interior invalid lines (bad JSON, bad envelope).
-- `real/` — two reviewed redacted Zamil session exports (see its README).
+- `real/` — two reviewed redacted agent-session exports (see its README).
 
 `agent-events.json` is the tool-owned contract for `--events` checks.
 

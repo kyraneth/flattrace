@@ -1,0 +1,15 @@
+{
+  "events": {
+    "journal.export": {
+      "fields": {
+        "entryId": "frozen journal entry ID"
+      },
+      "kind": "point"
+    },
+    "run": {
+      "fields": {},
+      "kind": "span"
+    }
+  },
+  "tool": "exporter"
+}

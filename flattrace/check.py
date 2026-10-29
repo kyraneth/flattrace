@@ -1,10 +1,14 @@
 # SPDX-License-Identifier: MIT
 """Envelope/span validation and tool-owned command coverage."""
 import gzip
+import hashlib
 import json
 import math
 import re
 from datetime import datetime
+from pathlib import Path
+
+from .sanitize import LONE_SURROGATE
 
 
 def validate_event(row):
@@ -51,6 +55,21 @@ def reject_constant(value):
     raise ValueError(f"invalid JSON number: {value}")
 
 
+from .sanitize import LONE_SURROGATE
+
+
+def _has_surrogate(value):
+    """True when any string anywhere in the parsed row holds a lone surrogate."""
+    if isinstance(value, str):
+        return bool(LONE_SURROGATE.search(value))
+    if isinstance(value, list):
+        return any(_has_surrogate(item) for item in value)
+    if isinstance(value, dict):
+        return any(_has_surrogate(key) or _has_surrogate(item)
+                   for key, item in value.items())
+    return False
+
+
 def _lines(path, issues):
     """Yield raw lines from plain JSONL or a gzip-published <name>.jsonl.gz."""
     opener = gzip.open if str(path).endswith(".gz") else open
@@ -62,7 +81,12 @@ def _lines(path, issues):
 
 
 def read_trace(path):
-    rows, issues = [], []
+    """Read one trace file: validated rows plus exact check.py issue strings.
+
+    Returns (rows, issues, notices). Notices are non-failing warnings, such
+    as legacy lone-surrogate escapes that writers since 0.3.0 replace.
+    """
+    rows, issues, notices = [], [], []
     for number, line in enumerate(_lines(path, issues), 1):
         try:
             row = json.loads(line.decode("utf-8"), parse_constant=reject_constant)
@@ -76,10 +100,12 @@ def read_trace(path):
         try:
             validate_event(row)
             rows.append(row)
+            if _has_surrogate(row):
+                notices.append(f"line {number}: lone surrogate escape")
         except (ValueError, TypeError) as exc:
             issues.append(f"line {number}: {exc}")
     if not rows:
-        return rows, issues + ["missing run start and end"]
+        return rows, issues + ["missing run start and end"], notices
     first, last = rows[0], rows[-1]
     if first["event"] != "run" or first["state"] != "start":
         issues.append("first line must be run start")
@@ -125,50 +151,180 @@ def read_trace(path):
             issues.append(f"point outside active span {span}")
     for span in active:
         issues.append(f"unfinished span {span}: missing end")
-    return rows, issues
+    return rows, issues, notices
 
 
-def check_events(rows, contract, command=None):
-    """Small per-run coverage assertion; field descriptions are documentation."""
+def _canonical(value):
+    """Parsed-JSON equality form: object key order ignored, array order and
+    descriptions counted."""
+    return json.dumps(value, sort_keys=True, allow_nan=False)
+
+
+def _display(contract):
+    return contract.get("path", contract.get("tool", "<events>"))
+
+
+def _valid_manifest_entry(entry):
+    return (isinstance(entry, dict) and isinstance(entry.get("tool"), str)
+            and isinstance(entry.get("sha256"), str))
+
+
+def _declaration_level(declaration):
+    level = declaration.get("level", 1)
+    if not isinstance(level, int) or isinstance(level, bool) or level < 1:
+        return 1
+    return level
+
+
+def check_events(rows, contracts, command=None):
+    """Per-run coverage over the union of the supplied vocabulary files.
+
+    `contracts` is a list of read_events() results (a single contract dict is
+    accepted for convenience). Returns (issues, notices). See
+    docs/reference.md for the composition truth table.
+    """
+    if isinstance(contracts, dict):
+        contracts = [contracts]
+    issues, notices = [], []
     if not rows:
-        return []  # read_trace already reports missing run.
-    issues = []
-    if rows[0]["tool"] != contract["tool"]:
+        return issues, notices  # read_trace already reports missing run.
+    # Byte-identical files are one vocabulary; dedupe before the owner check.
+    unique = []
+    seen_sha = set()
+    for contract in contracts:
+        sha = contract.get("sha256")
+        if sha is not None:
+            if sha in seen_sha:
+                continue
+            seen_sha.add(sha)
+        unique.append(contract)
+    manifest = None
+    has_manifest = False
+    data = rows[0].get("data")
+    if isinstance(data, dict) and "vocabularies" in data:
+        has_manifest = True
+        manifest = data.get("vocabularies")
+    if not has_manifest:
+        # Legacy run: compose the given files; lack of fingerprints is
+        # unverified provenance, not a failure and not invented provenance.
+        effective = list(unique)
+        if contracts:
+            notices.append("unverified provenance: run has no data.vocabularies")
+        single = len(unique) == 1
+    else:
+        single = False
+        if (not isinstance(manifest, list)
+                or not all(_valid_manifest_entry(entry) for entry in manifest)):
+            return issues + ["invalid data.vocabularies in run start"], notices
+        listed = {entry["sha256"]: entry for entry in manifest}
+        supplied = {}
+        for contract in unique:
+            sha = contract.get("sha256")
+            if sha is not None:
+                supplied[sha] = contract
+        for contract in unique:
+            sha = contract.get("sha256")
+            if sha is None or sha not in listed:
+                issues.append(f"extra vocabulary file '{_display(contract)}' "
+                              "not listed in run data.vocabularies")
+        for entry in manifest:
+            if entry["sha256"] not in supplied:
+                issues.append(f"vocabulary '{entry['tool']}' in run "
+                              "data.vocabularies not supplied "
+                              f"(sha256 {entry['sha256']})")
+        effective = []
+        for sha, contract in supplied.items():
+            if sha not in listed:
+                continue  # Extra files never widen the allowed set.
+            if contract.get("tool") != listed[sha].get("tool"):
+                issues.append(
+                    f"vocabulary file '{_display(contract)}' tool "
+                    f"'{contract.get('tool')}' does not match run "
+                    f"data.vocabularies tool '{listed[sha].get('tool')}'")
+                continue
+            effective.append(contract)
+    # Cross-file consistency over the effective set, in first-seen order.
+    for left_pos in range(len(effective)):
+        for right_pos in range(left_pos + 1, len(effective)):
+            left, right = effective[left_pos], effective[right_pos]
+            if left.get("tool") == right.get("tool"):
+                issues.append(
+                    f"duplicate vocabulary tool '{left.get('tool')}' in "
+                    f"'{_display(left)}' and '{_display(right)}'")
+            for name in left.get("events", {}):
+                if name in right.get("events", {}) and _canonical(
+                        left["events"][name]) != _canonical(right["events"][name]):
+                    issues.append(
+                        f"conflicting event definition '{name}' in "
+                        f"'{_display(left)}' and '{_display(right)}'")
+            for command_id in (left.get("commands") or {}):
+                if command_id in (right.get("commands") or {}):
+                    issues.append(
+                        f"duplicate command '{command_id}' in "
+                        f"'{_display(left)}' and '{_display(right)}'")
+    if single and rows[0]["tool"] != unique[0].get("tool"):
         issues.append("event list tool mismatch")
     command = rows[0]["data"].get("command") if command is None else command
-    commands = contract.get("commands")
-    required = contract.get("required", [])
-    if commands is not None:
-        if not isinstance(command, str):
-            return issues + ["select a command with --command (or run data.command) for this contract"]
-        if command not in commands:
-            issues.append(f"undeclared command {command!r}")
-        required = [*required, *commands.get(command, [])]
+    if single and manifest is None and unique[0].get("commands") is not None \
+            and not isinstance(command, str):
+        # Today's single-file check: a command contract needs a selection
+        # before any per-row validation runs.
+        return (issues + ["select a command with --command "
+                           "(or run data.command) for this contract"], notices)
+    declared = {}
+    for contract in effective:
+        for name, declaration in contract.get("events", {}).items():
+            declared.setdefault(name, declaration)
     run_level = rows[0]["data"].get("level", 1)
     run_level = run_level if isinstance(run_level, int) and not isinstance(run_level, bool) else 1
-    declared = lambda name: contract["events"].get(name, {}).get("level", 1)
-    required = [name for name in required if declared(name) <= run_level]
+    level_of = lambda name: _declaration_level(declared.get(name, {}))
     present, over = set(), set()
     for row in rows:
         name = row["event"]
         present.add(name)
-        if name in contract["events"] and declared(name) > run_level and name not in over:
+        if name in declared and level_of(name) > run_level and name not in over:
             over.add(name)
-            issues.append(f"level {declared(name)} event {name} in level {run_level} run")
-        declaration = contract["events"].get(name)
+            issues.append(f"level {level_of(name)} event {name} in level {run_level} run")
+        declaration = declared.get(name)
         if declaration is None:
             issues.append(f"undeclared event {name}")
         elif declaration["kind"] != ("point" if row["state"] == "point" else "span"):
             issues.append(f"wrong event kind {name}")
-    for name in required:
-        if name not in present:
-            issues.append(f"missing required event {name} for {command}")
-    return issues
+    # Each vocabulary's required events and command rules apply only to the
+    # vocabulary that declares them; one owner cannot fail another's runs.
+    label = command if isinstance(command, str) else "run"
+    declared_commands = set()
+    for contract in effective:
+        declared_commands.update((contract.get("commands") or {}).keys())
+    if (isinstance(command, str) and declared_commands
+            and command not in declared_commands):
+        issues.append(f"undeclared command {command!r}")
+    for contract in effective:
+        required = [name for name in contract.get("required", [])
+                    if _declaration_level(contract["events"][name]) <= run_level]
+        commands = contract.get("commands")
+        if commands is None:
+            wanted = required
+        elif not isinstance(command, str):
+            continue  # Command-scoped rules need a command this file declares.
+        elif command in commands:
+            wanted = [*required, *[name for name in commands[command]
+                                     if _declaration_level(contract["events"][name]) <= run_level]]
+        else:
+            continue  # Another owner's command; this file imposes nothing.
+        for name in wanted:
+            if name not in present:
+                issues.append(f"missing required event {name} for {label}")
+    return issues, notices
 
 
 def read_events(path):
-    with open(path, encoding="utf-8") as stream:
-        contract = json.load(stream)
+    raw = Path(path).read_bytes()
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"event list is not UTF-8: {exc}")
+    contract = json.loads(text)
     if (not isinstance(contract, dict) or not isinstance(contract.get("tool"), str)
             or not isinstance(contract.get("events"), dict)
             or ("commands" in contract and not isinstance(contract["commands"], dict))):
@@ -184,4 +340,8 @@ def read_events(path):
     for command, names in [("required", contract.get("required", [])), *contract.get("commands", {}).items()]:
         if not isinstance(names, list) or not all(isinstance(n, str) and n in contract["events"] for n in names):
             raise ValueError(f"invalid required events for {command}")
-    return contract
+    return {"tool": contract["tool"], "path": str(path),
+            "sha256": hashlib.sha256(raw).hexdigest(),
+            "events": contract["events"],
+            "required": contract.get("required", []),
+            "commands": contract.get("commands")}

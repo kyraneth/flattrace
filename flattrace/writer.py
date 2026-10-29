@@ -11,7 +11,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .sanitize import sanitize_argv
+from .sanitize import LONE_SURROGATE, sanitize_argv
 
 CONTEXT_ENV = "FLATTRACE_TRACEPARENT"
 LEVEL_ENV = "FLATTRACE_LEVEL"
@@ -51,10 +51,35 @@ def representation(value):
         return "<unserializable value>"
 
 
+def _replace_surrogates(value, notes):
+    """Replace lone surrogates with U+FFFD; valid pairs pass through."""
+    if not LONE_SURROGATE.search(value):
+        return value
+    parts = []
+    i = 0
+    while i < len(value):
+        code = ord(value[i])
+        if (0xD800 <= code <= 0xDBFF and i + 1 < len(value)
+                and 0xDC00 <= ord(value[i + 1]) <= 0xDFFF):
+            parts.append(chr(0x10000 + ((code - 0xD800) << 10)
+                             + ord(value[i + 1]) - 0xDC00))
+            i += 2
+        elif 0xD800 <= code <= 0xDFFF:
+            notes.add("lone surrogate replaced with U+FFFD")
+            parts.append("\ufffd")
+            i += 1
+        else:
+            parts.append(value[i])
+            i += 1
+    return "".join(parts)
+
+
 def normalize(value, notes, active=None):
     """Copy JSON values once; replace only the parts that cannot be recorded."""
-    if value is None or isinstance(value, (str, bool, int)):
+    if value is None or isinstance(value, (bool, int)):
         return value
+    if isinstance(value, str):
+        return _replace_surrogates(value, notes)
     if isinstance(value, float):
         if math.isfinite(value):
             return value
@@ -62,7 +87,7 @@ def normalize(value, notes, active=None):
         return None
     if not isinstance(value, (dict, list, tuple)):
         notes.add("unserializable value replaced with text")
-        return representation(value)
+        return _replace_surrogates(representation(value), notes)
     if active is None:
         active = set()
     identity = id(value)
@@ -73,7 +98,14 @@ def normalize(value, notes, active=None):
     try:
         if isinstance(value, dict):
             if all(isinstance(key, str) for key in value):
-                return {key: normalize(item, notes, active) for key, item in value.items()}
+                result = {}
+                for key, item in value.items():
+                    safe = _replace_surrogates(key, notes)
+                    if safe in result:
+                        notes.add("object keys collide after surrogate replacement")
+                        continue
+                    result[safe] = normalize(item, notes, active)
+                return result
             # Pairs preserve keys without stringification collisions (1 versus "1").
             notes.add("non-string object keys represented as pairs")
             return [[normalize(key, notes, active), normalize(item, notes, active)]
@@ -81,7 +113,7 @@ def normalize(value, notes, active=None):
         return [normalize(item, notes, active) for item in value]
     except Exception:
         notes.add("unserializable value replaced with text")
-        return representation(value)
+        return _replace_surrogates(representation(value), notes)
     finally:
         active.remove(identity)
 
@@ -194,11 +226,12 @@ class Writer:
         if error is not None and not isinstance(extra["error"], dict):
             extra["error"] = {"kind": error["kind"], "message": error["message"],
                               "context": extra["error"]}
+        envelope = normalize(dict(tool=self.tool, tool_version=self.tool_version,
+                                  run=self.run, trace=self.trace, span=span,
+                                  parent=parent, event=event, state=state), notes)
         for note in sorted(notes):
             data = add_note(data, note)
-        row = dict(v=1, seq=self.seq, tool=self.tool, tool_version=self.tool_version,
-                   run=self.run, trace=self.trace, span=span, parent=parent,
-                   event=event, state=state,
+        row = dict(v=1, seq=self.seq, **envelope,
                    t=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                    data=data, **extra)
         # Full envelope validation belongs to the offline checker, not each write.
@@ -212,9 +245,6 @@ class Writer:
                 row["error"] = {"kind": "serialization", "message": representation(row["error"])}
             line = json.dumps(row, ensure_ascii=False, allow_nan=False)
         self.seq += 1
-        # All UTF-16 surrogates, not just surrogateescape's byte subset, are safe.
-        if not line.isascii():
-            line = re.sub(r"[\ud800-\udfff]", "\ufffd", line)
         if self.file is not None:
             try:
                 self.file.write(line + "\n")

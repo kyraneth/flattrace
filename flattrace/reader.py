@@ -44,8 +44,17 @@ def _dump(value):
 
 
 def check(paths, events=None, command=None):
-    """Per-file validation; mirrors ``flattrace check`` (see docs/reader.md)."""
-    events = None if events is None else os.fspath(events)
+    """Per-file validation; mirrors ``flattrace check`` (see docs/reader.md).
+
+    ``events`` is a list of tool-owned event-list paths, validated as a
+    union (repeatable ``--events``); a single path is accepted for
+    convenience.
+    """
+    if events is None:
+        events = []
+    elif isinstance(events, (str, os.PathLike)):
+        events = [events]
+    events = [os.fspath(path) for path in events]
     return json.loads(_engine().check(_paths(paths), events, command))
 
 

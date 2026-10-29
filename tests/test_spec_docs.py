@@ -42,9 +42,9 @@ class SpecDocumentationTests(unittest.TestCase):
             writer.point("result", {"value": 6}, span=span)
             writer.end(span, "ok")
             writer.close()
-            rows, issues = read_trace(path / "trace.jsonl")
+            rows, issues, _ = read_trace(path / "trace.jsonl")
             self.assertEqual(issues, [])
-            self.assertEqual(check_events(rows, contract), [])
+            self.assertEqual(check_events(rows, [contract])[0], [])
 
     def test_utc_spellings_keep_old_files_valid(self):
         with tempfile.TemporaryDirectory() as directory:

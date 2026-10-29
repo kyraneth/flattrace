@@ -1,0 +1,67 @@
+{
+  "events": {
+    "action": {
+      "fields": {
+        "argv": "sanitized argv after tool-specific redaction; a planted secret is masked, never absent",
+        "bytes_changed": "bytes changed, null when unknown",
+        "exit_code": "observed process result, null when unknown",
+        "kind": "observed operation kind: read, edit, write, exec, net or send for a named versioned allowlist of built-in tools, null otherwise",
+        "lines_added": "lines added, null when unknown",
+        "lines_removed": "lines removed, null when unknown",
+        "paths": "observed paths, null when unknown"
+      },
+      "kind": "point",
+      "level": 2
+    },
+    "annotate": {
+      "fields": {
+        "cost": "detector cost, null when unknown",
+        "detector": "calling detector identity {name, version, kind: model, code or human}",
+        "input_sha256": "fingerprint of the detector input",
+        "questions": "what was asked",
+        "usage": "model usage, null when unknown"
+      },
+      "kind": "span"
+    },
+    "annotation": {
+      "fields": {
+        "detector": "calling detector identity {name, version, kind: model, code or human}",
+        "id": "stable annotation id across re-labels",
+        "input_sha256": "fingerprint of the detector input",
+        "label": "detector suggestion label",
+        "probability": "null when the detector does not return one",
+        "supersedes": "replaced annotation id, named explicitly never by last-wins",
+        "target": "annotated occurrence {trace, run, span?, entryId?, t_from?, t_to?, seq?}"
+      },
+      "kind": "point"
+    },
+    "changes": {
+      "fields": {
+        "coverage": "what was not seen: untracked or ignored paths are blindness, not absence",
+        "files": "observed file deltas [{path, added, removed}]",
+        "source": "observed delta source: git porcelain status or fs"
+      },
+      "kind": "point",
+      "level": 2
+    },
+    "run": {
+      "fields": {},
+      "kind": "span"
+    },
+    "verdict": {
+      "fields": {
+        "correct": "boolean correctness, null if unknown",
+        "grader": "grader identity {name, version, kind: model, code or human}",
+        "name": "score name",
+        "reason": "grader explanation",
+        "reward": "explicit reward, null if unknown never zero-filled",
+        "run": "target run id",
+        "score": "numeric score, null if unknown",
+        "span": "optional step-grading target span",
+        "trace": "target trace id"
+      },
+      "kind": "point"
+    }
+  },
+  "tool": "flattrace-conventions"
+}

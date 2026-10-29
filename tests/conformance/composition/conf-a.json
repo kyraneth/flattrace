@@ -1,0 +1,19 @@
+{
+  "events": {
+    "run": {
+      "fields": {},
+      "kind": "span"
+    },
+    "shared": {
+      "fields": {
+        "detail": "shared shape, first wording"
+      },
+      "kind": "span"
+    },
+    "typed": {
+      "fields": {},
+      "kind": "span"
+    }
+  },
+  "tool": "conf-a"
+}

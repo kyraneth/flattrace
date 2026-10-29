@@ -185,7 +185,7 @@ fn assert_golden(name: &str, mut actual: Value) {
 #[test]
 fn check_matches_golden() {
     let files = corpus_files();
-    let actual = flattrace_read::check(&files, None, None).unwrap();
+    let actual = flattrace_read::check(&files, &[], None).unwrap();
     assert_golden("check.json", actual);
 }
 
@@ -199,11 +199,66 @@ fn check_events_matches_golden() {
         .into_owned();
     let actual = flattrace_read::check(
         &[corpus_dir().join("c01-parent.jsonl").to_string_lossy().into_owned()],
-        Some(&events),
+        &[events],
         None,
     )
     .unwrap();
     assert_golden("check_events.json", actual);
+}
+
+fn composition_dir() -> PathBuf {
+    golden_dir().parent().unwrap().join("composition")
+}
+
+#[test]
+fn check_composition_matches_golden() {
+    let comp = composition_dir();
+    let prefix = format!("{}/", comp.to_string_lossy());
+    let cases: Value = serde_json::from_str(
+        &std::fs::read_to_string(comp.join("cases.json")).unwrap(),
+    )
+    .unwrap();
+    let mut actual = Vec::new();
+    for case in cases["cases"].as_array().cloned().unwrap_or_default() {
+        let run = case["run"].as_str().unwrap().to_string();
+        let events: Vec<String> = case["events"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default()
+            .iter()
+            .map(|name| comp.join(name.as_str().unwrap()).to_string_lossy().into_owned())
+            .collect();
+        let command = case.get("command").and_then(|v| v.as_str());
+        let mut entry = flattrace_read::check(
+            &[comp.join(&run).to_string_lossy().into_owned()],
+            &events,
+            command,
+        )
+        .unwrap()
+        .as_array()
+        .cloned()
+        .unwrap()[0]
+            .clone();
+        // Goldens stay portable: composition messages name files by basename.
+        entry["file"] = Value::String(run.clone());
+        entry["events"] = case["events"].clone();
+        for key in ["issues", "notices"] {
+            let stripped: Vec<Value> = entry[key]
+                .as_array()
+                .cloned()
+                .unwrap_or_default()
+                .iter()
+                .map(|item| {
+                    Value::String(
+                        item.as_str().unwrap_or("").replace(&prefix, ""),
+                    )
+                })
+                .collect();
+            entry[key] = Value::Array(stripped);
+        }
+        actual.push(entry);
+    }
+    assert_golden("check_composition.json", Value::Array(actual));
 }
 
 #[test]

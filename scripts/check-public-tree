@@ -1,0 +1,83 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: MIT
+"""Scan exactly the export-manifest-selected bytes for banned terms.
+
+Runs before every GitHub publication over the scripts/export-manifest
+selection (never the working tree at large, never a second copy): the
+bytes scanned are the bytes that would publish. Prints each hit as
+path:term and exits 1; exits 0 when clean, 2 on invocation/I-O failure.
+
+Banned terms are written as split literals so this file scans itself
+clean, the same technique as tests/test_conformance.py BANNED.
+"""
+import re
+import subprocess
+import sys
+from pathlib import Path
+
+HERE = Path(__file__).resolve().parent
+BANNED = (b"zam" b"il", b"mario" b".garden",
+          b"kyra" b"-server", b"for" b"gejo", b"/data" b"pool",
+          b"rust" b"bat", b":222" b"/", b"git.mario" b".garden",
+          b"shared" b"brain")
+PREFIXES = (b"go" b"al.", b"sub" b"agents.", b"mon" b"itor.")
+
+
+def prefix_hit(raw, prefix):
+    token = re.escape(prefix)
+    # JSON event values, qualified tokens, or a bare prefix on its own line.
+    # A sentence ending in an ordinary noun plus punctuation is not an event.
+    return re.search(rb'"event"\s*:\s*"' + token, raw) or re.search(
+        rb'(?<![\w.])' + token + rb'[a-z0-9_-]|^\s*' + token + rb'\s*$',
+        raw, re.MULTILINE)
+
+
+def manifest_paths(root):
+    out = subprocess.run([sys.executable, str(HERE / "export-manifest"),
+                          "--root", str(root)],
+                         capture_output=True, check=True, text=True)
+    return [line for line in out.stdout.splitlines() if line]
+
+
+def scan(root, paths):
+    hits = []
+    for rel in paths:
+        path = root / rel
+        try:
+            raw = path.read_bytes().lower()
+        except OSError as exc:
+            print(f"scripts/check-public-tree: {rel}: {exc}", file=sys.stderr)
+            return None
+        for term in BANNED:
+            if term in raw:
+                hits.append((rel, term.decode("ascii")))
+        for prefix in PREFIXES:
+            if prefix_hit(raw, prefix):
+                hits.append((rel, prefix.decode("ascii")))
+    return hits
+
+
+def main(argv):
+    root = Path.cwd()
+    args = list(argv)
+    while args and args[0] == "--root":
+        args.pop(0)
+        if not args:
+            print("missing value for --root", file=sys.stderr)
+            return 2
+        root = Path(args.pop(0))
+    try:
+        paths = args or manifest_paths(root)
+    except subprocess.CalledProcessError as exc:
+        print(f"scripts/check-public-tree: {exc}", file=sys.stderr)
+        return 2
+    hits = scan(root, paths)
+    if hits is None:
+        return 2
+    for rel, term in hits:
+        print(f"{rel}:{term}")
+    return 1 if hits else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

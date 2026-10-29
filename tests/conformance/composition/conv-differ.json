@@ -1,0 +1,15 @@
+{
+  "events": {
+    "annotation": {
+      "fields": {
+        "label": "a different wording for the same suggestion"
+      },
+      "kind": "point"
+    },
+    "run": {
+      "fields": {},
+      "kind": "span"
+    }
+  },
+  "tool": "differ"
+}

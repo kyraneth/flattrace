@@ -1,0 +1,19 @@
+{
+  "events": {
+    "extra": {
+      "fields": {},
+      "kind": "point"
+    },
+    "run": {
+      "fields": {},
+      "kind": "span"
+    },
+    "work": {
+      "fields": {
+        "item": "work item label"
+      },
+      "kind": "span"
+    }
+  },
+  "tool": "recorder"
+}

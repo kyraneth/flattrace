@@ -69,7 +69,7 @@ class ReaderBindingTests(unittest.TestCase):
         self.check_golden(
             "check_events.json",
             self.reader.check([os.path.join(CORPUS, "c01-parent.jsonl")],
-                              os.path.join(HERE, "conformance", "agent-events.json")))
+                              [os.path.join(HERE, "conformance", "agent-events.json")]))
 
     @needs_engine
     def test_spans(self):
@@ -139,6 +139,26 @@ class ReaderBindingTests(unittest.TestCase):
         self.assertEqual([(s["event"], s["span"]) for s in matched],
                          [("run", "1111111111111111"),
                           ("work", "2222222222222222")])
+
+    @needs_engine
+    def test_check_composition(self):
+        comp = os.path.join(HERE, "conformance", "composition")
+        with open(os.path.join(comp, "cases.json"),
+                   encoding="utf-8") as stream:
+            cases = json.load(stream)["cases"]
+        actual = []
+        for case in cases:
+            events = [os.path.join(comp, name) for name in case["events"]]
+            entry = dict(self.reader.check([os.path.join(comp, case["run"])],
+                                            events, case.get("command"))[0])
+            entry["file"] = case["run"]
+            entry["events"] = list(case["events"])
+            entry["issues"] = [s.replace(comp + "/", "")
+                                 for s in entry["issues"]]
+            entry["notices"] = [s.replace(comp + "/", "")
+                                  for s in entry["notices"]]
+            actual.append(entry)
+        self.check_golden("check_composition.json", actual)
 
     @needs_engine
     def test_matches_reference_float_policy(self):

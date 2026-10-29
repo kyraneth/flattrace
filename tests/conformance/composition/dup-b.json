@@ -1,0 +1,18 @@
+{
+  "commands": {
+    "build": [
+      "db.step"
+    ]
+  },
+  "events": {
+    "db.step": {
+      "fields": {},
+      "kind": "span"
+    },
+    "run": {
+      "fields": {},
+      "kind": "span"
+    }
+  },
+  "tool": "dup-b"
+}

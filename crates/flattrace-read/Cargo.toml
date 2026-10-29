@@ -1,6 +1,6 @@
 [package]
 name = "flattrace-read"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 description = "Offline reader engine for flattrace v1 JSONL: check, pair, quantiles, digest and query"

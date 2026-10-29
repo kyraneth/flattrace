@@ -25,7 +25,7 @@ export class EngineUnavailable extends Error {
 }
 
 type NativeBinding = {
-  check(files: string[], events?: string, command?: string): string;
+  check(files: string[], events?: string[], command?: string): string;
   stats(files: string[]): string;
   spans(files: string[], filter?: string): string;
   digest(files: string[], scope?: string): string;
@@ -85,7 +85,7 @@ function dump(value: unknown): string | undefined {
   return value === undefined || value === null ? undefined : JSON.stringify(value);
 }
 
-export function check(files: string[], events?: string, command?: string): unknown {
+export function check(files: string[], events?: string[], command?: string): unknown {
   return JSON.parse(engine().check(files, events, command));
 }
 

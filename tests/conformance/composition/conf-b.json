@@ -1,0 +1,19 @@
+{
+  "events": {
+    "run": {
+      "fields": {},
+      "kind": "span"
+    },
+    "shared": {
+      "fields": {
+        "detail": "shared shape, second wording"
+      },
+      "kind": "span"
+    },
+    "typed": {
+      "fields": {},
+      "kind": "point"
+    }
+  },
+  "tool": "conf-b"
+}

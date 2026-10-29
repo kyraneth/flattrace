@@ -1,0 +1,30 @@
+{
+  "events": {
+    "action": {
+      "fields": {
+        "kind": "observed operation kind"
+      },
+      "kind": "point"
+    },
+    "changes": {
+      "fields": {
+        "source": "git or fs delta source"
+      },
+      "kind": "point"
+    },
+    "run": {
+      "fields": {},
+      "kind": "span"
+    },
+    "work": {
+      "fields": {
+        "item": "work item label"
+      },
+      "kind": "span"
+    }
+  },
+  "required": [
+    "work"
+  ],
+  "tool": "recorder"
+}

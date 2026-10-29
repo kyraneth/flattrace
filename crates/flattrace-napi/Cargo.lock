@@ -85,7 +85,7 @@ dependencies = [
 
 [[package]]
 name = "flattrace-napi"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "flattrace-read",
  "napi",
@@ -95,7 +95,7 @@ dependencies = [
 
 [[package]]
 name = "flattrace-read"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "flate2",
  "rusqlite",

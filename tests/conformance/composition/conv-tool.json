@@ -1,0 +1,15 @@
+{
+  "events": {
+    "run": {
+      "fields": {},
+      "kind": "span"
+    },
+    "stage": {
+      "fields": {
+        "phase": "pipeline phase label"
+      },
+      "kind": "span"
+    }
+  },
+  "tool": "conv-tool"
+}

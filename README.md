@@ -8,6 +8,359 @@
 
 **Flat file, deep trace.** flattrace records what a tool did as small, local JSONL events: nested steps, outcomes, errors and measured durations, even across child processes. Python, Rust and TypeScript writers share one v1 envelope. Check traces, find slow steps and redact a bundle for a bug report—all offline, without a collector, server or account. Code, docs and examples are [MIT licensed](LICENSE).
 
+## What one trace line is
+
+Every flattrace line has the same fixed **envelope**. That's the format, and
+it never changes per tool. Here is one line a Pi agent session wrote when a
+`bash` tool call finished:
+
+```json
+{"v":1, "seq":41, "t":"2026-10-27T10:31:05.112Z", "tool":"flattrace-pi", "tool_version":"0.1.0",
+ "trace":"ae77…", "run":"r-7f3…", "span":"58ae…", "parent":"12bc…",
+ "event":"pi.tool", "state":"end", "took_ms":610, "outcome":"ok",
+ "data":{"toolName":"bash","toolCallId":"c1","exitCode":0,"truncated":false,"outputBytes":2210}}
+```
+
+```mermaid
+flowchart LR
+  L[one trace line] --> E["envelope<br/>v seq t tool tool_version<br/>trace run span parent<br/>event state took_ms outcome"]
+  L --> D["data<br/>toolName exitCode outputBytes …"]
+  E --> F["the format: the same for every tool in the world"]
+  D --> O["owned by whoever declared the event"]
+```
+
+- **The envelope** is the same for every tool in the world. That's what makes
+  flattrace one format: any reader can pair starts with ends, build the span
+  tree and compute durations without knowing anything about Pi.
+- **`event`** is a static name like `pi.tool`.
+- **`data`** is free-form. Its meaning belongs to whoever declared the event.
+
+So flattrace standardises the **shape** of a record, and each tool owns the
+**meaning** of its events.
+
+## The vocabulary: who says what an event means
+
+Each owner publishes a `flattrace-events.json`, a dictionary of the events it
+writes:
+
+```json
+{ "tool": "flattrace-pi",
+  "events": {
+    "run":        {"kind":"span"},
+    "pi.tool":    {"kind":"span", "fields":{
+                     "toolName":"Registered tool name",
+                     "outputBytes":"Returned bytes when exposed, otherwise null",
+                     "truncated":"Whether Pi cut the output (boolean)"}},
+    "pi.journal": {"kind":"point", "fields":{"entryId":"Exact persisted journal entry ID"}} }}
+```
+
+**What the checker enforces** ([SPEC](SPEC.md), "Tool event files and checking"):
+
+With or without a vocabulary, it checks structure and lifecycle: spans must
+be paired, and unfinished runs and spans are reported as unfinished.
+Vocabularies additionally check:
+
+- every event name in the trace exists in the dictionary;
+- its `kind` matches: a span has a start and an end, a point is a single line;
+- optional `required` events, and per-`commands` requirements (for example,
+  "a `capture` run must contain `capture.fetch`");
+- optional detail `level`s: debug-level events can't appear in a normal-level run.
+
+**What the checker doesn't enforce:** the payload. Field descriptions are
+documentation with units, not a schema. That's deliberate: tools keep
+evolving their `data` without a schema migration, and their own tests own the
+meaning.
+
+That's why the vocabulary matters so much. It's the **contract that keeps a
+trace honest**. Without it, a typo like `pi.tol` passes silently; an
+unfinished span is still reported.
+
+## Several owners, one run
+
+A real agent loads extensions. Each one writes its own events into the same
+run, and each ships its own small dictionary:
+
+```mermaid
+flowchart TB
+  P["one Pi process"] --> W["one writer"] --> R["one run file"]
+  FP["flattrace-pi<br/>pi.agent pi.turn pi.model<br/>pi.tool pi.journal pi.skill.read"] --> W
+  T["a todo extension<br/>todo.add todo.done"] --> W
+  X["your extension<br/>your.events"] --> W
+  FP -.-> V1["flattrace-events.json<br/>tool: flattrace-pi"]
+  T -.-> V2["flattrace-events.json<br/>tool: todo"]
+  X -.-> V3["flattrace-events.json<br/>tool: yours"]
+```
+
+**At runtime:**
+
+```mermaid
+sequenceDiagram
+  participant Pi
+  participant FP as flattrace-pi
+  participant Ext as each extension
+  participant File as run file
+  Pi->>FP: load, open the single writer
+  Ext->>FP: registerVocabulary(its dictionary file)
+  FP->>File: run start, listing every dictionary by sha256
+  Ext->>FP: withSpan / emitPoint, refused outside the registered names
+  FP->>File: one line each, seq counting up
+```
+
+1. Pi starts and loads **flattrace-pi**. The recorder prepares the process's
+   single writer, without writing the `run` start yet.
+2. Each extension that loads calls flattrace-pi's extension point,
+   `registerVocabulary(path)`, before the run starts. Its events then go
+   through the same handle (`withSpan`, `emitPoint`), which refuses any name
+   outside the registered dictionaries.
+3. After registration, flattrace-pi writes the `run` start line listing
+   **which dictionaries this run uses**, each by fingerprint:
+   ```json
+   "data":{"vocabularies":[{"tool":"flattrace-pi","version":"0.1.0","sha256":"3f…"},
+                           {"tool":"todo","version":"1.2.0","sha256":"a9…"}]}
+   ```
+4. Every event goes through the one writer, in order, with `seq` counting up.
+
+**Checking:**
+
+```sh
+flattrace check run.jsonl --events flattrace-pi.json --events todo.json
+```
+
+- The run is validated against the **union** of the dictionaries.
+- **Collisions are errors.** If two dictionaries define `todo.add`
+  differently, the checker names both files. Identical duplicates are fine;
+  for example, every file declares the reserved `run`.
+- **Fingerprints are checked.** If the supplied `todo.json` isn't the one the
+  run declared (an older or newer version), the checker says so. You always
+  know exactly which contract a trace was written under, even years later.
+- **No merged copy.** The run points at its dictionaries by fingerprint and
+  nobody writes a combined file, because a copy could drift.
+- **Who is `tool`?** The envelope `tool` is the program that wrote the run;
+  each event belongs to the dictionary that declares it. Each owner's
+  `required` and `commands` rules apply only to its own events.
+
+The whole extension story in one sentence: install flattrace-pi, ship your
+own small dictionary, register it, and your events sit in the same trace as
+Pi's, checked together. Any other program works the same way with its own
+recorder; flattrace-pi is just the one for Pi.
+
+## Why not the alternatives
+
+| Option | Why not |
+|---|---|
+| One big dictionary for every tool | Owners don't own their events; every change edits a hidden central registry. |
+| A separate trace file per owner | Breaks causality: a `todo.add` must sit inside the `pi.turn` span that caused it, on one timeline with one `seq`. |
+| Write a merged dictionary into each run | A second authority that drifts, and it bloats every trace. |
+| Make `data` a strict schema | Payloads evolve without migrations, and each tool's tests own their meaning. |
+
+## How this serves reading and learning
+
+Because every event has an owner, a version and a fingerprint:
+
+- **Readers** can trust names. `pi.tool` always means the same thing for a
+  given flattrace-pi version, so recipes ("all truncated tool outputs the next
+  turn relied on") are deterministic code, not guesswork.
+- **Detectors and graders** write the same way: their `annotation` and
+  `verdict` events come from one shared vocabulary,
+  [schema/conventions-events.json](schema/conventions-events.json), and are
+  checked like any other event. See [docs/learning.md](docs/learning.md).
+- **Benchmarks** can tell whether two runs were written under the same
+  dictionaries; comparability itself comes from the task, seed and hash block
+  in [docs/learning.md](docs/learning.md).
+- **Findings know where they belong:** the event's owner tells you whose code
+  a problem is in.
+
+**An honest open limit:** there is no shared monotonic clock across
+processes, so exact cross-process self time is reported as unknown rather
+than guessed (see [ROADMAP.md](ROADMAP.md)).
+
+**When not to use flattrace:** it is not live monitoring. There is no
+collector, sampling or alerting, only small local files studied after the
+run.
+
+## Try it
+
+Every `json trace:` block below is a complete run file, and every
+`json events:` block a complete vocabulary file: `tests/test_readme.py`
+extracts them and runs each against the real checker.
+
+The smallest run, three lines:
+
+```json trace:first-run
+{"v": 1, "seq": 0, "tool": "app", "tool_version": "0.3.0", "run": "readme-first", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "a1a1a1a1a1a1a1a1", "parent": null, "event": "run", "state": "start", "t": "2026-10-27T00:00:00.000Z", "data": {"argv": ["serve"], "host": "example", "version": "0.3.0"}}
+{"v": 1, "seq": 1, "tool": "app", "tool_version": "0.3.0", "run": "readme-first", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "a1a1a1a1a1a1a1a1", "parent": null, "event": "app.ping", "state": "point", "t": "2026-10-27T00:00:01.000Z", "data": {"latency_ms": 3}}
+{"v": 1, "seq": 2, "tool": "app", "tool_version": "0.3.0", "run": "readme-first", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "a1a1a1a1a1a1a1a1", "parent": null, "event": "run", "state": "end", "t": "2026-10-27T00:00:02.000Z", "data": {}, "took_ms": 12, "outcome": "ok"}
+```
+
+One owner, one dictionary. An app declares its events:
+
+```json events:app-vocab
+{
+  "tool": "app",
+  "events": {
+    "run": {
+      "kind": "span",
+      "fields": {}
+    },
+    "app.request": {
+      "kind": "span",
+      "fields": {
+        "route": "request route path",
+        "status": "response status code (number)"
+      }
+    },
+    "app.tool": {
+      "kind": "span",
+      "fields": {
+        "name": "tool name",
+        "outputBytes": "bytes returned (number)"
+      }
+    }
+  }
+}
+```
+
+and this run nests an `app.tool` span inside an `app.request` span:
+
+```json trace:app-run
+{"v": 1, "seq": 0, "tool": "app", "tool_version": "0.3.0", "run": "readme-app", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "a1a1a1a1a1a1a1a1", "parent": null, "event": "run", "state": "start", "t": "2026-10-27T00:00:00.000Z", "data": {"argv": ["serve"], "host": "example", "version": "0.3.0"}}
+{"v": 1, "seq": 1, "tool": "app", "tool_version": "0.3.0", "run": "readme-app", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "b2b2b2b2b2b2b2b2", "parent": "a1a1a1a1a1a1a1a1", "event": "app.request", "state": "start", "t": "2026-10-27T00:00:01.000Z", "data": {"route": "/tiles"}}
+{"v": 1, "seq": 2, "tool": "app", "tool_version": "0.3.0", "run": "readme-app", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "c3c3c3c3c3c3c3c3", "parent": "b2b2b2b2b2b2b2b2", "event": "app.tool", "state": "start", "t": "2026-10-27T00:00:01.000Z", "data": {"name": "render"}}
+{"v": 1, "seq": 3, "tool": "app", "tool_version": "0.3.0", "run": "readme-app", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "c3c3c3c3c3c3c3c3", "parent": "b2b2b2b2b2b2b2b2", "event": "app.tool", "state": "end", "t": "2026-10-27T00:00:02.000Z", "data": {"outputBytes": 512}, "took_ms": 4, "outcome": "ok"}
+{"v": 1, "seq": 4, "tool": "app", "tool_version": "0.3.0", "run": "readme-app", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "b2b2b2b2b2b2b2b2", "parent": "a1a1a1a1a1a1a1a1", "event": "app.request", "state": "end", "t": "2026-10-27T00:00:02.000Z", "data": {"status": 200}, "took_ms": 9, "outcome": "ok"}
+{"v": 1, "seq": 5, "tool": "app", "tool_version": "0.3.0", "run": "readme-app", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "a1a1a1a1a1a1a1a1", "parent": null, "event": "run", "state": "end", "t": "2026-10-27T00:00:02.000Z", "data": {}, "took_ms": 11, "outcome": "ok"}
+```
+
+```sh
+flattrace check app-run.jsonl --events app-vocab.json
+```
+
+```text
+app-run.jsonl: 6 valid events (unverified provenance: run has no data.vocabularies)
+```
+
+Several owners: a `render` plugin ships its own dictionary,
+
+```json events:render-vocab
+{
+  "tool": "render",
+  "events": {
+    "run": {
+      "kind": "span",
+      "fields": {}
+    },
+    "render.tile": {
+      "kind": "span",
+      "fields": {
+        "tile": "tile identity",
+        "pixels": "pixel count (number)"
+      }
+    }
+  }
+}
+```
+
+and its spans sit inside the app's request in the same run:
+
+```json trace:app-mixed
+{"v": 1, "seq": 0, "tool": "app", "tool_version": "0.3.0", "run": "readme-mixed", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "a1a1a1a1a1a1a1a1", "parent": null, "event": "run", "state": "start", "t": "2026-10-27T00:00:00.000Z", "data": {"argv": ["serve"], "host": "example", "version": "0.3.0", "vocabularies": [{"tool": "app", "version": "0.3.0", "sha256": "700e2fbe54385d8ce0ece742accffb9a625b70f435559894d028097cefbcdf1c"}, {"tool": "render", "version": "0.3.0", "sha256": "1a71b43658da828ffa6499b33fbdf0056c9826dd05161f97fbf214cbef0e0ad3"}]}}
+{"v": 1, "seq": 1, "tool": "app", "tool_version": "0.3.0", "run": "readme-mixed", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "b2b2b2b2b2b2b2b2", "parent": "a1a1a1a1a1a1a1a1", "event": "app.request", "state": "start", "t": "2026-10-27T00:00:01.000Z", "data": {"route": "/tiles"}}
+{"v": 1, "seq": 2, "tool": "app", "tool_version": "0.3.0", "run": "readme-mixed", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "c3c3c3c3c3c3c3c3", "parent": "b2b2b2b2b2b2b2b2", "event": "render.tile", "state": "start", "t": "2026-10-27T00:00:01.000Z", "data": {"tile": "t-7", "pixels": 65536}}
+{"v": 1, "seq": 3, "tool": "app", "tool_version": "0.3.0", "run": "readme-mixed", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "c3c3c3c3c3c3c3c3", "parent": "b2b2b2b2b2b2b2b2", "event": "render.tile", "state": "end", "t": "2026-10-27T00:00:02.000Z", "data": {}, "took_ms": 6, "outcome": "ok"}
+{"v": 1, "seq": 4, "tool": "app", "tool_version": "0.3.0", "run": "readme-mixed", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "b2b2b2b2b2b2b2b2", "parent": "a1a1a1a1a1a1a1a1", "event": "app.request", "state": "end", "t": "2026-10-27T00:00:02.000Z", "data": {"status": 200}, "took_ms": 9, "outcome": "ok"}
+{"v": 1, "seq": 5, "tool": "app", "tool_version": "0.3.0", "run": "readme-mixed", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "a1a1a1a1a1a1a1a1", "parent": null, "event": "run", "state": "end", "t": "2026-10-27T00:00:03.000Z", "data": {}, "took_ms": 11, "outcome": "ok"}
+```
+
+```sh
+flattrace check mixed.jsonl --events app-vocab.json --events render-vocab.json
+```
+
+```text
+mixed.jsonl: 6 valid events
+```
+
+When owners disagree, the checker says so. A forked plugin redefines
+`render.tile` with fewer fields:
+
+```json events:render-collide
+{
+  "tool": "render-fork",
+  "events": {
+    "run": {
+      "kind": "span",
+      "fields": {}
+    },
+    "render.tile": {
+      "kind": "span",
+      "fields": {
+        "tile": "tile identity"
+      }
+    }
+  }
+}
+```
+
+```json trace:collision-run
+{"v": 1, "seq": 0, "tool": "app", "tool_version": "0.3.0", "run": "readme-collision", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "a1a1a1a1a1a1a1a1", "parent": null, "event": "run", "state": "start", "t": "2026-10-27T00:00:00.000Z", "data": {"argv": ["serve"], "host": "example", "version": "0.3.0", "vocabularies": [{"tool": "render", "version": "0.3.0", "sha256": "1a71b43658da828ffa6499b33fbdf0056c9826dd05161f97fbf214cbef0e0ad3"}, {"tool": "render-fork", "version": "0.3.0", "sha256": "6124c4372e36d6ab197543cd73693f61c9db1c453b4d0f7992644d1930da9591"}]}}
+{"v": 1, "seq": 1, "tool": "app", "tool_version": "0.3.0", "run": "readme-collision", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "b2b2b2b2b2b2b2b2", "parent": "a1a1a1a1a1a1a1a1", "event": "render.tile", "state": "start", "t": "2026-10-27T00:00:01.000Z", "data": {"tile": "t-7", "pixels": 65536}}
+{"v": 1, "seq": 2, "tool": "app", "tool_version": "0.3.0", "run": "readme-collision", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "b2b2b2b2b2b2b2b2", "parent": "a1a1a1a1a1a1a1a1", "event": "render.tile", "state": "end", "t": "2026-10-27T00:00:02.000Z", "data": {}, "took_ms": 6, "outcome": "ok"}
+{"v": 1, "seq": 3, "tool": "app", "tool_version": "0.3.0", "run": "readme-collision", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "a1a1a1a1a1a1a1a1", "parent": null, "event": "run", "state": "end", "t": "2026-10-27T00:00:03.000Z", "data": {}, "took_ms": 11, "outcome": "ok"}
+```
+
+```sh
+flattrace check collision.jsonl --events render-vocab.json --events render-fork.json
+```
+
+```text
+collision.jsonl: conflicting event definition 'render.tile' in 'render-vocab.json' and 'render-fork.json'
+```
+
+The same name with a different parsed definition, even a description-only
+change, is an error naming both files. Byte-identical files deduplicate first,
+so every vocabulary can copy the reserved `run` declaration
+([schema/run-declaration.json](schema/run-declaration.json)) without
+colliding on it. And when a supplied file is not the one the run declared,
+the run fails instead of silently validating against a different contract:
+
+```json trace:hash-run
+{"v": 1, "seq": 0, "tool": "app", "tool_version": "0.3.0", "run": "readme-hash", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "a1a1a1a1a1a1a1a1", "parent": null, "event": "run", "state": "start", "t": "2026-10-27T00:00:00.000Z", "data": {"argv": ["serve"], "host": "example", "version": "0.3.0", "vocabularies": [{"tool": "app", "version": "0.3.0", "sha256": "0000000000000000000000000000000000000000000000000000000000000000"}]}}
+{"v": 1, "seq": 1, "tool": "app", "tool_version": "0.3.0", "run": "readme-hash", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "b2b2b2b2b2b2b2b2", "parent": "a1a1a1a1a1a1a1a1", "event": "app.request", "state": "start", "t": "2026-10-27T00:00:01.000Z", "data": {"route": "/tiles"}}
+{"v": 1, "seq": 2, "tool": "app", "tool_version": "0.3.0", "run": "readme-hash", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "b2b2b2b2b2b2b2b2", "parent": "a1a1a1a1a1a1a1a1", "event": "app.request", "state": "end", "t": "2026-10-27T00:00:02.000Z", "data": {"status": 200}, "took_ms": 9, "outcome": "ok"}
+{"v": 1, "seq": 3, "tool": "app", "tool_version": "0.3.0", "run": "readme-hash", "trace": "f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1", "span": "a1a1a1a1a1a1a1a1", "parent": null, "event": "run", "state": "end", "t": "2026-10-27T00:00:03.000Z", "data": {}, "took_ms": 11, "outcome": "ok"}
+```
+
+```sh
+flattrace check hash.jsonl --events app-vocab.json
+```
+
+```text
+hash.jsonl: extra vocabulary file 'app-vocab.json' not listed in run data.vocabularies; vocabulary 'app' in run data.vocabularies not supplied (sha256 0000000000000000000000000000000000000000000000000000000000000000); undeclared event run; undeclared event app.request; undeclared event app.request; undeclared event run
+```
+
+The full rules live in the
+[composition truth table](docs/reference.md#composition-truth-table).
+
+To implement a writer in your own software, follow [SPEC.md](SPEC.md), the
+frozen conformance corpus (`tests/conformance/`) and `flattrace check`.
+
+## Glossary
+
+- **format**: the v1 envelope every line shares. Not a catalogue of events.
+- **writer**: serializes and flushes one run file. It does not decide what its
+  host should observe.
+- **recorder**: host hooks that emit a vocabulary (a generic harness recorder,
+  a plugin, your own tool).
+- **event vocabulary**: one owner's `flattrace-events.json`. Several may apply
+  to one run; `flattrace check` validates the run against their union.
+- **convention**: an optional cross-tool `data` shape (annotations, actions,
+  grades). Never an envelope change; see [docs/learning.md](docs/learning.md).
+- **reader / checker**: pairs spans, checks structure and declared names.
+  It never judges payload meaning.
+- **detector** and **annotation**: a detector notices a shape; its annotation
+  is a suggestion, never correctness and never a verdict.
+- **grader** and **verdict**: a grader compares an output to a reference; its
+  verdict is an assessment that stays beside the evidence.
+
 ## Install
 
 ```sh
@@ -18,7 +371,7 @@ npm install flattrace                 # Node writer + TypeScript declarations (+
 
 Packages: [PyPI](https://pypi.org/project/flattrace/),
 [crates.io](https://crates.io/crates/flattrace) and
-[npm](https://www.npmjs.com/package/flattrace). The 0.2.0 PyPI release ships
+[npm](https://www.npmjs.com/package/flattrace). The 0.3.0 Python distribution builds
 `cp310-abi3` wheels (manylinux2014 x86_64, macOS arm64) carrying the compiled
 reader engine, plus a pure `py3-none-any` fallback where the writer and
 check/export/stats keep working and the new `flattrace.reader` functions
@@ -142,8 +495,8 @@ local overlap or incomplete evidence prevents safe attribution.
 ## Read at scale
 
 The Rust reader engine (`crates/flattrace-read`) replays the corpus once,
-spills span records and exact-quantile samples to a temporary SQLite file and
-answers a frozen function set documented in [docs/reader.md](docs/reader.md):
+keeps span records (including payloads and attached points) in memory, spills
+only exact-quantile samples to a temporary SQLite file, and answers a frozen function set documented in [docs/reader.md](docs/reader.md):
 `check`, `spans` (paired rows with filters), `digest` (compact table, error
 census, exact pointers, coverage statement), `group`, `tree` (traceparent
 across processes), `compare` and `overlap` (stall windows vs spans). Filters

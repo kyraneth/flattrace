@@ -1,0 +1,202 @@
+[
+  {
+    "events": [
+      "rec.json",
+      "plug.json"
+    ],
+    "file": "comp-pass.jsonl",
+    "issues": [],
+    "notices": [],
+    "rows": 12
+  },
+  {
+    "events": [
+      "rec.json",
+      "plug.json"
+    ],
+    "file": "comp-undeclared.jsonl",
+    "issues": [
+      "undeclared event rogue.event"
+    ],
+    "notices": [],
+    "rows": 5
+  },
+  {
+    "events": [
+      "conf-a.json",
+      "conf-b.json"
+    ],
+    "file": "comp-conflict-def.jsonl",
+    "issues": [
+      "conflicting event definition 'shared' in 'conf-a.json' and 'conf-b.json'",
+      "conflicting event definition 'typed' in 'conf-a.json' and 'conf-b.json'"
+    ],
+    "notices": [],
+    "rows": 6
+  },
+  {
+    "events": [
+      "same-a.json",
+      "same-b.json"
+    ],
+    "file": "comp-sametool.jsonl",
+    "issues": [
+      "duplicate vocabulary tool 'recorder' in 'same-a.json' and 'same-b.json'"
+    ],
+    "notices": [],
+    "rows": 4
+  },
+  {
+    "events": [
+      "rec.json",
+      "rec.json"
+    ],
+    "file": "comp-identical.jsonl",
+    "issues": [],
+    "notices": [
+      "unverified provenance: run has no data.vocabularies"
+    ],
+    "rows": 4
+  },
+  {
+    "events": [
+      "rec.json"
+    ],
+    "file": "comp-hash.jsonl",
+    "issues": [
+      "extra vocabulary file 'rec.json' not listed in run data.vocabularies",
+      "vocabulary 'recorder' in run data.vocabularies not supplied (sha256 0000000000000000000000000000000000000000000000000000000000000000)",
+      "undeclared event run",
+      "undeclared event work",
+      "undeclared event work",
+      "undeclared event run"
+    ],
+    "notices": [],
+    "rows": 4
+  },
+  {
+    "events": [
+      "rec.json",
+      "export.json"
+    ],
+    "file": "comp-extra-journal.jsonl",
+    "issues": [
+      "extra vocabulary file 'export.json' not listed in run data.vocabularies",
+      "undeclared event journal.export"
+    ],
+    "notices": [],
+    "rows": 5
+  },
+  {
+    "events": [
+      "cmda.json",
+      "cmdb.json"
+    ],
+    "file": "comp-foreign-pass.jsonl",
+    "issues": [],
+    "notices": [],
+    "rows": 3
+  },
+  {
+    "events": [
+      "cmda.json",
+      "cmdb.json"
+    ],
+    "file": "comp-foreign-fail.jsonl",
+    "issues": [
+      "missing required event a.fetch for capture"
+    ],
+    "notices": [],
+    "rows": 3
+  },
+  {
+    "events": [
+      "dup-a.json",
+      "dup-b.json"
+    ],
+    "file": "comp-dup-command.jsonl",
+    "issues": [
+      "duplicate command 'build' in 'dup-a.json' and 'dup-b.json'"
+    ],
+    "notices": [],
+    "rows": 6
+  },
+  {
+    "events": [
+      "rec.json",
+      "plug.json"
+    ],
+    "file": "comp-no-manifest.jsonl",
+    "issues": [],
+    "notices": [
+      "unverified provenance: run has no data.vocabularies"
+    ],
+    "rows": 5
+  },
+  {
+    "events": [
+      "rec.json"
+    ],
+    "file": "comp-envelope.jsonl",
+    "issues": [
+      "event list tool mismatch"
+    ],
+    "notices": [
+      "unverified provenance: run has no data.vocabularies"
+    ],
+    "rows": 4
+  },
+  {
+    "events": [
+      "rec.json"
+    ],
+    "file": "comp-dup-seq.jsonl",
+    "issues": [
+      "seq gap or reordering: expected 2, got 1"
+    ],
+    "notices": [],
+    "rows": 4
+  },
+  {
+    "events": [
+      "rec.json"
+    ],
+    "file": "comp-unknown.jsonl",
+    "issues": [],
+    "notices": [],
+    "rows": 4
+  },
+  {
+    "events": [
+      "rec.json"
+    ],
+    "file": "comp-surrogate.jsonl",
+    "issues": [],
+    "notices": [
+      "line 2: lone surrogate escape"
+    ],
+    "rows": 4
+  },
+  {
+    "events": [
+      "../../../schema/conventions-events.json",
+      "conv-tool.json"
+    ],
+    "file": "comp-conv-pass.jsonl",
+    "issues": [],
+    "notices": [],
+    "rows": 8
+  },
+  {
+    "events": [
+      "../../../schema/conventions-events.json",
+      "conv-differ.json"
+    ],
+    "file": "comp-conv-conflict.jsonl",
+    "issues": [
+      "conflicting event definition 'annotation' in '../../../schema/conventions-events.json' and 'conv-differ.json'"
+    ],
+    "notices": [],
+    "rows": 5
+  }
+]

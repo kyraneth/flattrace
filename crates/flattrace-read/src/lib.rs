@@ -79,22 +79,24 @@ fn parse_optional(text: Option<&str>) -> Result<Option<Value>, EngineError> {
     }
 }
 
-pub fn check(paths: &[String], events_path: Option<&str>, command: Option<&str>) -> Result<Value, EngineError> {
+pub fn check(paths: &[String], events: &[String], command: Option<&str>) -> Result<Value, EngineError> {
     let paths = expand_inputs(paths)?;
-    let contract = match events_path {
-        Some(path) => Some(validate::read_events(Path::new(path)).map_err(|e| match e {
+    let mut contracts = Vec::new();
+    for path in events {
+        contracts.push(validate::read_events(Path::new(path)).map_err(|e| match e {
             validate::ReadEventsError::Io(inner) => (2, inner.to_string()),
             validate::ReadEventsError::Invalid(msg) => (1, msg),
-        })?),
-        None => None,
-    };
+        })?);
+    }
     let mut out = Vec::new();
     for path in &paths {
-        let (rows, mut issues) = validate::read_trace(Path::new(path)).map_err(|e| (2, e.to_string()))?;
-        if let Some(contract) = &contract {
-            issues.extend(validate::check_events(&rows, contract, command));
+        let (rows, mut issues, mut notices) = validate::read_trace(Path::new(path)).map_err(|e| (2, e.to_string()))?;
+        if !contracts.is_empty() {
+            let (extra, extra_notices) = validate::check_events(&rows, &contracts, command);
+            issues.extend(extra);
+            notices.extend(extra_notices);
         }
-        out.push(serde_json::json!({ "file": path, "rows": rows.len(), "issues": issues }));
+        out.push(serde_json::json!({ "file": path, "rows": rows.len(), "issues": issues, "notices": notices }));
     }
     Ok(Value::Array(out))
 }

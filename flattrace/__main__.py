@@ -13,7 +13,8 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     check = commands.add_parser("check")
     check.add_argument("files", nargs="+")
-    check.add_argument("--events", help="tool-owned event list")
+    check.add_argument("--events", action="append", default=[],
+                       help="tool-owned event list (repeatable; validated as a union)")
     check.add_argument("--command", dest="command_id", help="explicit command selector, including for legacy traces")
     copy = commands.add_parser("export")
     copy.add_argument("files", nargs="+")
@@ -33,13 +34,22 @@ def main():
             issues = export(args.files, args.out, paths=args.path, hosts=args.host, users=args.user)
             print("\n".join(issues) if issues else f"exported to {args.out}")
             return int(bool(issues))
-        contract = read_events(args.events) if args.events else None
+        contracts = [read_events(path) for path in args.events] if args.events else None
         failed = False
         for path in args.files:
-            rows, issues = read_trace(path)
-            if contract is not None:
-                issues.extend(check_events(rows, contract, args.command_id))
-            print(f"{path}: " + ("; ".join(issues) if issues else f"{len(rows)} valid events"))
+            rows, issues, notices = read_trace(path)
+            if contracts is not None:
+                extra, extra_notices = check_events(rows, contracts, args.command_id)
+                issues.extend(extra)
+                notices.extend(extra_notices)
+            detail = "; ".join(issues)
+            if notices:
+                note = "; ".join(notices)
+                if detail:
+                    detail = f"{detail} ({note})"
+                else:
+                    detail = f"{len(rows)} valid events ({note})"
+            print(f"{path}: " + (detail if detail else f"{len(rows)} valid events"))
             failed |= bool(issues)
         return int(failed)
     except ValueError as exc:

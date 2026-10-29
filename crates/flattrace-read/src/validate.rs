@@ -10,6 +10,158 @@ use std::fs::File;
 use std::io::{self, BufRead, BufReader};
 use std::path::Path;
 
+/// SHA-256 of exact vocabulary file bytes (the manifest hash authority).
+/// Hand-rolled so the engine adds no digest dependency for one hash use.
+fn sha256_hex(data: &[u8]) -> String {
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1,
+        0x923f82a4, 0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3,
+        0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786,
+        0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+        0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147,
+        0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13,
+        0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+        0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a,
+        0x5b9cca4f, 0x682e6ff3, 0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208,
+        0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+    ];
+    let mut h: [u32; 8] = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+        0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19,
+    ];
+    let mut padded = data.to_vec();
+    let bits = (data.len() as u64).wrapping_mul(8);
+    padded.push(0x80);
+    while padded.len() % 64 != 56 {
+        padded.push(0);
+    }
+    padded.extend_from_slice(&bits.to_be_bytes());
+    for chunk in padded.chunks_exact(64) {
+        let mut w = [0u32; 64];
+        for (i, word) in w.iter_mut().enumerate().take(16) {
+            let o = i * 4;
+            *word = u32::from_be_bytes([chunk[o], chunk[o + 1], chunk[o + 2], chunk[o + 3]]);
+        }
+        for i in 16..64 {
+            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16].wrapping_add(s0).wrapping_add(w[i - 7]).wrapping_add(s1);
+        }
+        let (mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh) =
+            (h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]);
+        for i in 0..64 {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let ch = (e & f) ^ ((!e) & g);
+            let t1 = hh.wrapping_add(s1).wrapping_add(ch).wrapping_add(K[i]).wrapping_add(w[i]);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let t2 = s0.wrapping_add(maj);
+            hh = g; g = f; f = e; e = d.wrapping_add(t1);
+            d = c; c = b; b = a; a = t1.wrapping_add(t2);
+        }
+        for (slot, val) in h.iter_mut().zip([a, b, c, d, e, f, g, hh]) {
+            *slot = slot.wrapping_add(val);
+        }
+    }
+    let mut out = String::with_capacity(64);
+    for word in h {
+        out.push_str(&format!("{word:08x}"));
+    }
+    out
+}
+
+fn hex4(bytes: &[u8]) -> Option<u32> {
+    if bytes.len() < 4 {
+        return None;
+    }
+    let mut value = 0u32;
+    for &c in &bytes[..4] {
+        value = value * 16
+            + match c {
+                b'0'..=b'9' => (c - b'0') as u32,
+                b'a'..=b'f' => (c - b'a' + 10) as u32,
+                b'A'..=b'F' => (c - b'A' + 10) as u32,
+                _ => return None,
+            };
+    }
+    Some(value)
+}
+
+/// Repair legacy lone-surrogate escapes so the line parses like the Python
+/// checker sees it. Valid surrogate pairs pass through unchanged; any other
+/// `\uD800`-`\uDFFF` escape becomes `\ufffd`. Returns the repaired text
+/// and whether any replacement happened. The scan is JSON-aware: only
+/// escapes inside strings are touched.
+fn repair_surrogates(text: &str) -> (String, bool) {
+    let bytes = text.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut found = false;
+    let mut i = 0;
+    let mut in_string = false;
+    let mut escaped = false;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if !in_string {
+            out.push(c);
+            if c == b'"' {
+                in_string = true;
+            }
+            i += 1;
+            continue;
+        }
+        if escaped {
+            escaped = false;
+            if c == b'u' {
+                if let Some(v) = hex4(bytes.get(i + 1..).unwrap_or(&[])) {
+                    if (0xD800..0xDC00).contains(&v) {
+                        let low = if bytes.get(i + 5) == Some(&b'\\')
+                            && bytes.get(i + 6) == Some(&b'u')
+                        {
+                            hex4(bytes.get(i + 7..).unwrap_or(&[]))
+                        } else {
+                            None
+                        };
+                        if let Some(w) = low {
+                            if (0xDC00..0xE000).contains(&w) {
+                                out.extend_from_slice(&bytes[i..i + 11]);
+                                i += 11;
+                                continue;
+                            }
+                        }
+                        out.pop();
+                        out.extend_from_slice(b"\\ufffd");
+                        found = true;
+                        i += 5;
+                        continue;
+                    } else if (0xDC00..0xE000).contains(&v) {
+                        out.pop();
+                        out.extend_from_slice(b"\\ufffd");
+                        found = true;
+                        i += 5;
+                        continue;
+                    }
+                }
+            }
+            out.push(c);
+            i += 1;
+            continue;
+        }
+        if c == b'\\' {
+            out.push(c);
+            escaped = true;
+            i += 1;
+            continue;
+        }
+        if c == b'"' {
+            in_string = false;
+        }
+        out.push(c);
+        i += 1;
+    }
+    (String::from_utf8(out).expect("repair copies valid UTF-8"), found)
+}
+
 fn is_hex_lower(value: &str, width: usize, nonzero: bool) -> bool {
     value.len() == width
         && value
@@ -226,9 +378,17 @@ fn str_field<'a>(row: &'a Value, key: &str) -> &'a str {
     row.get(key).and_then(|v| v.as_str()).unwrap_or("")
 }
 
-pub fn read_trace(path: &Path) -> io::Result<(Vec<Value>, Vec<String>)> {
+/// Read one trace file: validated rows plus the exact check.py issue strings.
+/// The third channel carries non-failing warnings (legacy lone-surrogate
+/// escapes, reported identically by every checker).
+///
+/// Lines that fail strict JSON parsing get one lenient retry: lone-surrogate
+/// escapes are repaired to `\ufffd` (valid pairs pass through) and, when the
+/// repaired line validates, the row is kept with a warning notice.
+pub fn read_trace(path: &Path) -> io::Result<(Vec<Value>, Vec<String>, Vec<String>)> {
     let mut rows: Vec<Value> = Vec::new();
     let mut issues: Vec<String> = Vec::new();
+    let mut notices: Vec<String> = Vec::new();
     let reader = LineReader::open(path)?;
     for (index, item) in reader.enumerate() {
         let number = index + 1;
@@ -250,6 +410,22 @@ pub fn read_trace(path: &Path) -> io::Result<(Vec<Value>, Vec<String>)> {
         let row: Value = match serde_json::from_str(text) {
             Ok(row) => row,
             Err(error) => {
+                let (repaired, found) = repair_surrogates(text);
+                if found {
+                    if let Ok(row) = serde_json::from_str::<Value>(&repaired) {
+                        match validate_event(&row) {
+                            Ok(()) => {
+                                rows.push(row);
+                                notices.push(format!("line {number}: lone surrogate escape"));
+                                continue;
+                            }
+                            Err(detail) => {
+                                issues.push(format!("line {number}: {detail}"));
+                                continue;
+                            }
+                        }
+                    }
+                }
                 let prefix = if newline { "line" } else { "incomplete tail" };
                 issues.push(format!("{prefix} {number}: {error}"));
                 continue;
@@ -262,7 +438,7 @@ pub fn read_trace(path: &Path) -> io::Result<(Vec<Value>, Vec<String>)> {
     }
     if rows.is_empty() {
         issues.push("missing run start and end".to_string());
-        return Ok((rows, issues));
+        return Ok((rows, issues, notices));
     }
     let first = &rows[0];
 
@@ -380,16 +556,21 @@ pub fn read_trace(path: &Path) -> io::Result<(Vec<Value>, Vec<String>)> {
             issues.push(format!("unfinished span {span}: missing end"));
         }
     }
-    Ok((rows, issues))
+    Ok((rows, issues, notices))
 }
 
 /// Tool-owned event contract, mirroring read_events validation messages.
+/// Full parsed declarations are kept so composition can compare event
+/// definitions across files (parsed-JSON equality: object key order ignored,
+/// array order and descriptions counted).
 #[derive(Debug, Clone)]
 pub struct Contract {
     pub tool: String,
+    pub path: String,
+    pub sha256: String,
     pub required: Vec<String>,
     pub commands: Option<BTreeMap<String, Vec<String>>>,
-    pub events: BTreeMap<String, (String, i64)>,
+    pub events: BTreeMap<String, Value>,
 }
 
 /// read_events failures keep their kind: missing/unreadable contract files
@@ -410,8 +591,10 @@ impl std::fmt::Display for ReadEventsError {
 }
 
 pub fn read_events(path: &Path) -> Result<Contract, ReadEventsError> {
-    let text = std::fs::read_to_string(path).map_err(ReadEventsError::Io)?;
-    let contract: Value = serde_json::from_str(&text).map_err(|e: serde_json::Error| ReadEventsError::Invalid(e.to_string()))?;
+    let raw = std::fs::read(path).map_err(ReadEventsError::Io)?;
+    let text = std::str::from_utf8(&raw).map_err(|e| ReadEventsError::Invalid(format!("event list is not UTF-8: {e}")))?;
+    let sha256 = sha256_hex(&raw);
+    let contract: Value = serde_json::from_str(text).map_err(|e: serde_json::Error| ReadEventsError::Invalid(e.to_string()))?;
     let obj = contract.as_object().ok_or_else(|| ReadEventsError::Invalid("event list requires tool and events, with optional commands".to_string()))?;
     let tool = obj.get("tool").and_then(|v| v.as_str()).ok_or_else(|| ReadEventsError::Invalid("event list requires tool and events, with optional commands".to_string()))?;
     let events = obj.get("events").and_then(|v| v.as_object()).ok_or_else(|| ReadEventsError::Invalid("event list requires tool and events, with optional commands".to_string()))?;
@@ -428,15 +611,15 @@ pub fn read_events(path: &Path) -> Result<Contract, ReadEventsError> {
         if !matches!(kind, Some("span") | Some("point")) || !fields_ok {
             return Err(ReadEventsError::Invalid(format!("invalid event declaration {name}")));
         }
-        let level: i64 = match event.get("level") {
-            None => 1,
+        match event.get("level") {
+            None => {}
             Some(Value::Number(n)) => match n.as_u64() {
-                Some(v) if v >= 1 => v as i64,
+                Some(v) if v >= 1 => {}
                 _ => return Err(ReadEventsError::Invalid(format!("invalid level for event {name}"))),
             },
             _ => return Err(ReadEventsError::Invalid(format!("invalid level for event {name}"))),
         };
-        declarations.insert(name.clone(), (kind.unwrap().to_string(), level));
+        declarations.insert(name.clone(), event.clone());
     }
     let check_names = |names: &Vec<String>, command: &str| -> Result<(), ReadEventsError> {
         if !names.iter().all(|n| declarations.contains_key(n)) {
@@ -470,37 +653,194 @@ pub fn read_events(path: &Path) -> Result<Contract, ReadEventsError> {
         }
         commands = Some(table);
     }
-    Ok(Contract { tool: tool.to_string(), required, commands, events: declarations })
+    Ok(Contract { tool: tool.to_string(), path: path.to_string_lossy().into_owned(), sha256, required, commands, events: declarations })
 }
 
-pub fn check_events(rows: &[Value], contract: &Contract, command: Option<&str>) -> Vec<String> {
+/// Parsed-JSON equality of two event declarations: object key order ignored,
+/// array order and field descriptions counted.
+fn declaration_equal(left: &Value, right: &Value) -> bool {
+    match (left, right) {
+        (Value::Object(a), Value::Object(b)) => {
+            a.len() == b.len()
+                && a.iter().all(|(key, value)| {
+                    b.get(key).map(|other| declaration_equal(value, other)).unwrap_or(false)
+                })
+        }
+        (Value::Array(a), Value::Array(b)) => {
+            a.len() == b.len() && a.iter().zip(b.iter()).all(|(x, y)| declaration_equal(x, y))
+        }
+        (a, b) => a == b,
+    }
+}
+
+fn declaration_level(declaration: &Value) -> i64 {
+    match declaration.get("level") {
+        Some(Value::Number(n)) => match n.as_u64() {
+            Some(v) if v >= 1 => v as i64,
+            _ => 1,
+        },
+        _ => 1,
+    }
+}
+
+fn declaration_kind(declaration: &Value) -> &str {
+    declaration.get("kind").and_then(|v| v.as_str()).unwrap_or("")
+}
+
+/// Human identity for a vocabulary file in composition errors: its path,
+/// falling back to the tool name when a contract was built without one.
+fn display(contract: &Contract) -> &str {
+    if contract.path.is_empty() {
+        &contract.tool
+    } else {
+        &contract.path
+    }
+}
+
+/// Per-run coverage over the union of the supplied vocabulary files.
+/// Returns (issues, notices); the truth table lives in docs/reference.md.
+pub fn check_events(rows: &[Value], contracts: &[Contract], command: Option<&str>) -> (Vec<String>, Vec<String>) {
     let mut issues = Vec::new();
+    let mut notices = Vec::new();
     if rows.is_empty() {
-        return issues;
+        return (issues, notices);
     }
     let first = &rows[0];
-    if first.get("tool").and_then(|v| v.as_str()) != Some(contract.tool.as_str()) {
+    // Byte-identical files are one vocabulary; dedupe before the owner check.
+    let mut unique: Vec<&Contract> = Vec::new();
+    let mut seen_sha = std::collections::HashSet::new();
+    for contract in contracts {
+        if !seen_sha.insert(contract.sha256.clone()) {
+            continue;
+        }
+        unique.push(contract);
+    }
+    let manifest: Option<&Vec<Value>> = first
+        .get("data")
+        .and_then(|d| d.get("vocabularies"))
+        .and_then(|v| v.as_array());
+    let manifest_present = first
+        .get("data")
+        .and_then(|d| d.as_object())
+        .map(|d| d.contains_key("vocabularies"))
+        .unwrap_or(false);
+    let mut effective: Vec<&Contract> = Vec::new();
+    let mut single = false;
+    if !manifest_present {
+        // Legacy run: compose the given files; lack of fingerprints is
+        // unverified provenance, not a failure and not invented provenance.
+        effective = unique.clone();
+        if !contracts.is_empty() {
+            notices.push("unverified provenance: run has no data.vocabularies".to_string());
+        }
+        single = unique.len() == 1;
+    } else {
+        let entries = match manifest {
+            Some(entries)
+                if entries.iter().all(|e| {
+                    e.get("tool").and_then(|v| v.as_str()).is_some()
+                        && e.get("sha256").and_then(|v| v.as_str()).is_some()
+                }) =>
+            {
+                entries
+            }
+            _ => {
+                issues.push("invalid data.vocabularies in run start".to_string());
+                return (issues, notices);
+            }
+        };
+        let mut supplied: BTreeMap<&str, &Contract> = BTreeMap::new();
+        for contract in &unique {
+            supplied.insert(contract.sha256.as_str(), contract);
+        }
+        for contract in &unique {
+            if !entries.iter().any(|e| e.get("sha256").and_then(|v| v.as_str()) == Some(contract.sha256.as_str())) {
+                issues.push(format!(
+                    "extra vocabulary file '{}' not listed in run data.vocabularies",
+                    display(contract)
+                ));
+            }
+        }
+        for entry in entries {
+            let sha = entry.get("sha256").and_then(|v| v.as_str()).unwrap_or("");
+            let tool = entry.get("tool").and_then(|v| v.as_str()).unwrap_or("?");
+            if !supplied.contains_key(sha) {
+                issues.push(format!(
+                    "vocabulary '{tool}' in run data.vocabularies not supplied (sha256 {sha})"
+                ));
+            }
+        }
+        for contract in &unique {
+            let sha = contract.sha256.as_str();
+            let entry = entries.iter().find(|e| {
+                e.get("sha256").and_then(|v| v.as_str()) == Some(sha)
+            });
+            let Some(entry) = entry else { continue }; // Extra files never widen the allowed set.
+            let listed_tool = entry.get("tool").and_then(|v| v.as_str()).unwrap_or("?");
+            if contract.tool != listed_tool {
+                issues.push(format!(
+                    "vocabulary file '{}' tool '{}' does not match run data.vocabularies tool '{listed_tool}'",
+                    display(contract), contract.tool
+                ));
+                continue;
+            }
+            effective.push(contract);
+        }
+    }
+    // Cross-file consistency over the effective set, in first-seen order.
+    for (left_pos, left) in effective.iter().enumerate() {
+        for right in effective.iter().skip(left_pos + 1) {
+            if left.tool == right.tool {
+                issues.push(format!(
+                    "duplicate vocabulary tool '{}' in '{}' and '{}'",
+                    left.tool, display(left), display(right)
+                ));
+            }
+            for (name, declaration) in &left.events {
+                if let Some(other) = right.events.get(name) {
+                    if !declaration_equal(declaration, other) {
+                        issues.push(format!(
+                            "conflicting event definition '{name}' in '{}' and '{}'",
+                            display(left), display(right)
+                        ));
+                    }
+                }
+            }
+            if let Some(left_commands) = &left.commands {
+                if let Some(right_commands) = &right.commands {
+                    for command_id in left_commands.keys() {
+                        if right_commands.contains_key(command_id) {
+                            issues.push(format!(
+                                "duplicate command '{command_id}' in '{}' and '{}'",
+                                display(left), display(right)
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if single && first.get("tool").and_then(|v| v.as_str()) != Some(unique[0].tool.as_str()) {
         issues.push("event list tool mismatch".to_string());
     }
     let selected: Option<String> = match command {
         Some(id) => Some(id.to_string()),
         None => first.get("data").and_then(|d| d.get("command")).and_then(|v| v.as_str()).map(|s| s.to_string()),
     };
-    let mut required = contract.required.clone();
-    if let Some(commands) = &contract.commands {
-        match selected.as_ref() {
-            None => {
+    if single && !manifest_present {
+        if let Some(sole) = unique.first() {
+            // Today's single-file check: a command contract needs a selection
+            // before any per-row validation runs.
+            if sole.commands.is_some() && selected.is_none() {
                 issues.push("select a command with --command (or run data.command) for this contract".to_string());
-                return issues;
+                return (issues, notices);
             }
-            Some(id) => match commands.get(id) {
-                None => {
-                    issues.push(format!("undeclared command '{id}'"));
-                }
-                Some(names) => {
-                    required.extend(names.iter().cloned());
-                }
-            },
+        }
+    }
+    let mut declared: BTreeMap<&str, &Value> = BTreeMap::new();
+    for contract in &effective {
+        for (name, declaration) in &contract.events {
+            declared.entry(name.as_str()).or_insert(declaration);
         }
     }
     let run_level: i64 = first
@@ -508,40 +848,112 @@ pub fn check_events(rows: &[Value], contract: &Contract, command: Option<&str>) 
         .and_then(|d| d.get("level"))
         .and_then(|v| v.as_i64())
         .unwrap_or(1);
-    let declared = |name: &str| contract.events.get(name).map(|(_, level)| *level).unwrap_or(1);
-    required.retain(|name| declared(name) <= run_level);
     let mut present = std::collections::HashSet::new();
     let mut over = std::collections::HashSet::new();
     for row in rows {
         let name = row.get("event").and_then(|v| v.as_str()).unwrap_or("");
         present.insert(name.to_string());
-        if contract.events.contains_key(name) && declared(name) > run_level && !over.contains(name) {
-            over.insert(name.to_string());
-            issues.push(format!("level {} event {} in level {} run", declared(name), name, run_level));
+        if let Some(declaration) = declared.get(name) {
+            let level = declaration_level(declaration);
+            if level > run_level && !over.contains(name) {
+                over.insert(name.to_string());
+                issues.push(format!("level {level} event {name} in level {run_level} run"));
+            }
         }
-        match contract.events.get(name) {
+        match declared.get(name) {
             None => issues.push(format!("undeclared event {name}")),
-            Some((kind, _)) => {
+            Some(declaration) => {
                 let is_point = row.get("state").and_then(|v| v.as_str()) == Some("point");
                 let want = if is_point { "point" } else { "span" };
-                if kind != want {
+                if declaration_kind(declaration) != want {
                     issues.push(format!("wrong event kind {name}"));
                 }
             }
         }
     }
-    let selected_label = selected.clone().unwrap_or_else(|| "None".to_string());
-    for name in required {
-        if !present.contains(&name) {
-            issues.push(format!("missing required event {name} for {selected_label}"));
+    // Each vocabulary's required events and command rules apply only to the
+    // vocabulary that declares them; one owner cannot fail another's runs.
+    let label = selected.clone().unwrap_or_else(|| "run".to_string());
+    let mut declared_commands = std::collections::HashSet::new();
+    for contract in &effective {
+        if let Some(commands) = &contract.commands {
+            declared_commands.extend(commands.keys().cloned());
         }
     }
-    issues
+    if let Some(id) = selected.clone() {
+        if !declared_commands.is_empty() && !declared_commands.contains(&id) {
+            issues.push(format!("undeclared command '{id}'"));
+        }
+    }
+    for contract in &effective {
+        let mut wanted: Vec<&String> = contract
+            .required
+            .iter()
+            .filter(|name| {
+                contract.events.get(*name).map(declaration_level).unwrap_or(1) <= run_level
+            })
+            .collect();
+        match &contract.commands {
+            None => {}
+            Some(commands) => match selected.clone() {
+                None => continue, // Command-scoped rules need a command this file declares.
+                Some(id) => match commands.get(&id) {
+                    None => continue, // Another owner's command; this file imposes nothing.
+                    Some(names) => wanted.extend(names.iter().filter(|name| {
+                        contract.events.get(*name).map(declaration_level).unwrap_or(1) <= run_level
+                    })),
+                },
+            },
+        }
+        for name in wanted {
+            if !present.contains(name) {
+                issues.push(format!("missing required event {name} for {label}"));
+            }
+        }
+    }
+    (issues, notices)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sha256_vectors() {
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        // Cross-checked against Python hashlib on the same bytes.
+        assert_eq!(sha256_hex(b"flattrace-events"),
+            "6d78b3b9d6dd14518c1fbf53103269e4498573a11d99022da796edda23a73104");
+    }
+
+    #[test]
+    fn surrogate_repair_policy() {
+        // Lone high escape is repaired; the valid pair passes through.
+        let (text, found) = repair_surrogates(r#"{"a":"\ud800"}"#);
+        assert!(found);
+        assert_eq!(text, r#"{"a":"\ufffd"}"#);
+        let (text, found) = repair_surrogates(r#"{"a":"\ud83d\ude00"}"#);
+        assert!(!found);
+        assert_eq!(text, r#"{"a":"\ud83d\ude00"}"#);
+        // Lone low escape is repaired; escapes outside strings are untouched.
+        let (text, found) = repair_surrogates(r#"{"a":"\udfff"}"#);
+        assert!(found);
+        assert_eq!(text, r#"{"a":"\ufffd"}"#);
+        let (text, found) = repair_surrogates(r#"{"a":1} \ud800"#);
+        assert!(!found);
+        assert_eq!(text, r#"{"a":1} \ud800"#);
+        // A high surrogate followed by a non-low escape is still lone.
+        let (text, found) = repair_surrogates(r#"{"a":"\ud800X"}"#);
+        assert!(found);
+        assert_eq!(text, r#"{"a":"\ufffdX"}"#);
+    }
 
     #[test]
     fn timestamp_shapes() {

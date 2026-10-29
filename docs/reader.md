@@ -1,4 +1,4 @@
-# flattrace reader contract (frozen for the 0.2.0 engine)
+# flattrace reader contract (0.2.0 frozen; 0.3.0 revision below)
 
 Status: frozen. This document is the compatibility contract for the reader
 engine. The conformance corpus lives in `tests/conformance/corpus/` with
@@ -26,9 +26,16 @@ corpus analysis never merges divergent copies of one run.
 
 ## Functions
 
-- `check(paths, events?, command?)` — per-file validation. Each entry holds
-  `file` (echoed as given), `rows` (valid row count) and `issues` (the exact
-  `read_trace` strings, plus `check_events` strings when a contract is given).
+- `check(paths, events=[...], command?)` — per-file validation. Each entry holds
+  `file` (echoed as given), `rows` (valid row count), `issues` (the exact
+  `read_trace` strings, plus `check_events` strings when contracts are given)
+  and `notices` (non-failing warnings: unverified provenance, legacy
+  lone-surrogate escapes). `events` is a list of vocabulary files validated
+  as a union (see the composition truth table in
+  [reference](reference.md#composition-truth-table)); with exactly one file
+  and no run-start manifest, envelope `tool` must equal the vocabulary `tool`.
+  A run-start `data.vocabularies` manifest switches to composition mode (see
+  the truth table for missing, mismatched and extra files).
 - `spans(paths, filter?)` — paired rows, one per span start in file order.
   Unfinished spans stay unfinished: `end_t`, `end_seq`, `took_ms`, `outcome`
   and `end_data` are null, `unfinished` is true. Each row carries exact source
@@ -131,7 +138,7 @@ follow the same pairing pass.
 
 ## CLI mapping (Rust `flattrace-read`, step 2)
 
-`check [--events FILE] [--command ID]`, `stats` (the `flattrace.stats` report,
+`check [--events FILE]... [--command ID]`, `stats` (the `flattrace.stats` report,
 unchanged shape), `digest [--filter JSON]`, `spans [--filter JSON]`,
 `tree --trace ID`, `group --by a,b [--metrics m,n] [--filter JSON]`,
 `compare --a A.jsonl [--a ...] --b B.jsonl [--b ...]`,
@@ -167,11 +174,29 @@ for `tool`, `tool_version`, `run`, `event`, `state` and `t`, `invalid trace`,
 `event list tool mismatch`,
 `select a command with --command (or run data.command) for this contract`,
 `undeclared command '<id>'`, `undeclared event <name>`,
-`wrong event kind <name>`, `missing required event <name> for <command>`,
-`level <n> event <name> in level <m> run`.
+`wrong event kind <name>`, `missing required event <name> for <command|run>`,
+`level <n> event <name> in level <m> run`, plus the composition strings
+`extra vocabulary file '<path>' not listed in run data.vocabularies`,
+`vocabulary '<tool>' in run data.vocabularies not supplied (sha256 <sha>)`,
+`vocabulary file '<path>' tool '<a>' does not match run data.vocabularies tool '<b>'`,
+`duplicate vocabulary tool '<tool>' in '<a>' and '<b>'`,
+`conflicting event definition '<name>' in '<a>' and '<b>'`,
+`duplicate command '<id>' in '<a>' and '<b>'`,
+`invalid data.vocabularies in run start`, and the warning notices
+`unverified provenance: run has no data.vocabularies` and
+`line <n>: lone surrogate escape`.
 
 ## Versioning
 
 Additive output fields are allowed; renaming, removing or redefining a field,
 or changing pairing, summary or coverage semantics, requires a contract
 revision, regenerated goldens and a minor version bump of every binding.
+
+### 0.3.0 revision
+
+`check` takes a list of event files (`events=[...]`, repeatable `--events`)
+validated as a union, with the composition truth table, new composition issue
+strings, per-entry `notices`, and required/command rules scoped to the owning
+vocabulary (`missing required event` now reports `for <command|run>`). A
+single file without a run-start manifest behaves as 0.2.0. Goldens were
+regenerated for the new signature and the additive `notices` field.

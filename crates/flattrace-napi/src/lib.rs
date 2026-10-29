@@ -17,8 +17,8 @@ fn to_json(value: serde_json::Value) -> napi::Result<String> {
 }
 
 #[napi]
-pub fn check(paths: Vec<String>, events: Option<String>, command: Option<String>) -> napi::Result<String> {
-    flattrace_read::check(&paths, events.as_deref(), command.as_deref())
+pub fn check(paths: Vec<String>, events: Option<Vec<String>>, command: Option<String>) -> napi::Result<String> {
+    flattrace_read::check(&paths, &events.unwrap_or_default(), command.as_deref())
         .map_err(engine_error)
         .and_then(to_json)
 }

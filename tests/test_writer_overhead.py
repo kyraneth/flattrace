@@ -30,6 +30,7 @@ class WriterPayloadTests(unittest.TestCase):
             self.assertEqual(payload["values"][1][1], float("inf"))
             writer.point("unicode", {"text": "مرحبا", "path": os.fsdecode(b"synthetic-\xff")})
             row = json.loads(path.read_bytes().splitlines()[-1])
-            self.assertEqual(row["data"], {"text": "مرحبا", "path": "synthetic-\ufffd"})
+            self.assertEqual(row["data"], {"text": "مرحبا", "path": "synthetic-\ufffd",
+                                              "notes": ["lone surrogate replaced with U+FFFD"]})
             writer.close()
             self.assertFalse(read_trace(path)[1])

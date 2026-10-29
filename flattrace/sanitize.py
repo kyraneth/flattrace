@@ -10,6 +10,8 @@ SECRET_KEY = re.compile(rf"(?:{SECRET_NAME}|authorization)", re.I)
 ASSIGNMENT = re.compile(rf"(\b{NAME}\s*[=:]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s,;&]+)", re.I)
 AUTH = re.compile(r"(\bAuthorization\s*:\s*)(?:Bearer|Basic)\s+[^\s,;]+", re.I)
 URL_AUTH = re.compile(r"(https?://)[^/\s:@]+:[^/\s@]+@", re.I)
+# Lone UTF-16 surrogates: writers replace them with U+FFFD (valid pairs stay).
+LONE_SURROGATE = re.compile("[\ud800-\udfff]")
 FLAG_TEXT = re.compile(rf"(-+{NAME}\s+)(?:\"[^\"]*\"|'[^']*'|[^\s,;]+)", re.I)
 
 

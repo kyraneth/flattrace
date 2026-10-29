@@ -16,7 +16,11 @@ HERE = Path(__file__).resolve().parent / "conformance"
 CORPUS = HERE / "corpus"
 GOLDEN = HERE / "golden"
 
-BANNED = (b"/data" b"pool", b"kyra" b"-server", b"git.mario" b".garden", b":222" b"/")
+# Committed bytes must not carry private-development markers. Split literals
+# keep this file itself scannable: the joined sequences never appear here.
+BANNED = (b"/data" b"pool", b"kyra" b"-server", b"git.mario" b".garden",
+          b":222" b"/", b"zam" b"il", b"Zam" b"il", b"mario" b".garden",
+          b"for" b"gejo", b"rust" b"bat")
 
 
 def corpus_files():
@@ -47,8 +51,26 @@ class ConformanceTests(unittest.TestCase):
 
     def test_check_events(self):
         self.assertEqual(
-            reference.check(["c01-parent.jsonl"], str(HERE / "agent-events.json")),
+            reference.check(["c01-parent.jsonl"], [str(HERE / "agent-events.json")]),
             load_golden("check_events.json"))
+
+    def test_check_composition(self):
+        comp = HERE / "composition"
+        cases = json.loads((comp / "cases.json").read_text())["cases"]
+        actual = []
+        prefix = str(comp) + "/"
+        for case in cases:
+            events = [str(comp / name) for name in case["events"]]
+            entry = dict(reference.check([str(comp / case["run"])],
+                                         events, case.get("command"))[0])
+            entry["file"] = case["run"]
+            entry["events"] = list(case["events"])
+            entry["issues"] = [s.replace(prefix, "")
+                                 for s in entry["issues"]]
+            entry["notices"] = [s.replace(prefix, "")
+                                  for s in entry["notices"]]
+            actual.append(entry)
+        self.assertEqual(actual, load_golden("check_composition.json"))
 
     def test_spans_all(self):
         self.check_golden("spans_all.json",
@@ -141,20 +163,19 @@ class ConformanceTests(unittest.TestCase):
     def test_real_samples_shape(self):
         real = sorted(str(p) for p in (CORPUS / "real").glob("*.jsonl"))
         self.assertEqual([os.path.basename(p) for p in real],
-                         ["01.jsonl", "02.jsonl"])
+                         ["01.jsonl"])
         checked = reference.check(real)
         self.assertEqual(checked[0]["rows"], 39)
         self.assertEqual(checked[0]["issues"], [])
-        self.assertTrue(any("missing run end" in i for i in checked[1]["issues"]))
         digest = reference.digest(real)
         tools = {(t["tool"], t["event"]) for t in digest["table"]}
-        self.assertIn(("zamil", "eventloop.window"), tools)
-        self.assertIn(("zamil", "session.refresh"), tools)
+        self.assertIn(("recorder", "eventloop.window"), tools)
+        self.assertIn(("recorder", "session.refresh"), tools)
         window = next(t for t in digest["table"]
-                      if (t["tool"], t["event"]) == ("zamil", "eventloop.window"))
+                      if (t["tool"], t["event"]) == ("recorder", "eventloop.window"))
         self.assertEqual(window["n"], 6)
         self.assertIsInstance(window["took"]["p50"], float)
-        self.assertEqual(digest["coverage"]["runs"], 2)
+        self.assertEqual(digest["coverage"]["runs"], 1)
         overlap = reference.overlap(real, "eventloop.window",
                                     {"event": "session.refresh"})
         self.assertTrue(any(w["overlapping"] for w in overlap["windows"]))

@@ -1,5 +1,5 @@
 <svg width="512" height="512" viewBox="0 0 16 16" role="img" aria-labelledby="title desc" xmlns="http://www.w3.org/2000/svg">
 <title id="title">flattrace — 17 Shared edge / shorter third — light</title>
-<desc id="desc">13 unchanged except the bottom record ends half a viewBox unit earlier; the middle remains the sole error. Targeted path edit by Zamil, 2026-10-21. Transparent light-theme artwork. Original outlined wordmark retained.</desc>
+<desc id="desc">13 unchanged except the bottom record ends half a viewBox unit earlier; the middle remains the sole error. Targeted path edit, 2026-10-21. Transparent light-theme artwork. Original outlined wordmark retained.</desc>
 <g id="mark"><path id="original-json-brace" fill="#303B35" d="M6 1H5C2.5 1 2 2.5 2 4V5C2 6.25 1.5 7 1 7V9C1.5 9 2 9.75 2 11V12C2 13.5 2.5 15 5 15H6V13H5C4.2 13 4 12.6 4 12V11C4 9.6 3.65 8.6 2.8 8C3.65 7.4 4 6.4 4 5V4C4 3.4 4.2 3 5 3H6Z" /><path id="top-record" fill="#303B35" d="M7 3H15V5H7Z" /><path id="middle-record" fill="#AA4528" d="M7 7H13V9H7Z" /><path id="bottom-record" fill="#303B35" d="M7 11H11V13H7Z" /></g>
 </svg>

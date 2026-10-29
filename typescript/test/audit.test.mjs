@@ -49,7 +49,7 @@ test('only close ends the root in strict and harmless modes', t => {
   for (const name of readdirSync(dir)) checked(join(dir, name));
 });
 
-test('non-ASCII digits fall back and lone surrogates survive as escaped JSON', t => {
+test('non-ASCII digits fall back and lone surrogates are replaced with a note', t => {
   const dir = fixture(t);
   for (const raw of ['²', '٢', '２', '2²']) {
     const result = spawnSync(process.execPath, ['--input-type=module', '-e', `
@@ -60,10 +60,13 @@ test('non-ASCII digits fall back and lone surrogates survive as escaped JSON', t
     assert.equal(result.status, 0, result.stderr);
   }
   const w = new Writer(join(dir, 'unicode.jsonl'), 'synthetic', '1');
-  w.point('unicode', { high: '\ud800', low: '\udfff' });
+  w.point('unicode', { high: '\ud800', low: '\udfff', pair: '\ud83d\ude00' });
   w.point('continued'); w.close();
-  assert.equal(rows(w.path)[1].data.high, '\ud800');
-  assert.equal(rows(w.path)[1].data.low, '\udfff');
+  const data = rows(w.path)[1].data;
+  assert.equal(data.high, '\ufffd');
+  assert.equal(data.low, '\ufffd');
+  assert.equal(data.pair, '\ud83d\ude00');
+  assert.ok(data.notes.includes('lone surrogate replaced with U+FFFD'));
   checked(w.path);
 });
 

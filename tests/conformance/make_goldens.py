@@ -45,6 +45,24 @@ def write(name, payload):
     print(f"wrote {path}")
 
 
+def write_composition():
+    comp = HERE / "composition"
+    cases = json.loads((comp / "cases.json").read_text())["cases"]
+    out = []
+    prefix = str(comp) + "/"
+    for case in cases:
+        events = [str(comp / name) for name in case["events"]]
+        entry = dict(reference.check([str(comp / case["run"])],
+                                     events, case.get("command"))[0])
+        # Goldens stay portable: composition messages name files by basename.
+        entry["file"] = case["run"]
+        entry["events"] = list(case["events"])
+        entry["issues"] = [s.replace(prefix, "") for s in entry["issues"]]
+        entry["notices"] = [s.replace(prefix, "") for s in entry["notices"]]
+        out.append(entry)
+    write("check_composition.json", out)
+
+
 def main():
     files = corpus_files()
     closedata = [str(CORPUS / "closedata" / "01.jsonl")]
@@ -87,6 +105,7 @@ def main():
           reference.spans(parity, {"model": "nested-m"}))
     write("parity_spans_model_empty.json",
           reference.spans(parity, {"model": "env-m"}))
+    write_composition()
 
 
 if __name__ == "__main__":

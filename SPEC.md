@@ -132,8 +132,29 @@ usage; they do not change the envelope or checker behavior.
   `data.command` or CLI `--command ID`; legacy writers need no new payload field.
 - `check --events FILE TRACE...` MUST pair spans, reject undeclared names/kinds
   and check requirements per run, never satisfy them using another run.
+  `--events` MAY be repeated; the run is validated against the union of the
+  supplied vocabularies (see the composition truth table in
+  [reference](docs/reference.md)). A run MAY contain events owned by several
+  tools; it is validated against the union of their vocabularies.
   Tool tests MUST own payload meaning and command/branch coverage; field
   descriptions MUST NOT imply an executable payload schema.
+- Every event file MUST declare `run` with `kind: "span"`. Vocabularies that
+  are composed in one run copy the reserved `run` declaration published with
+  the checker
+  ([schema/run-declaration.json](schema/run-declaration.json), repeated in
+  [reference](docs/reference.md)): owner-specific measurement prose belongs
+  on the events that own those measurements, never in that shared block, so
+  composed vocabularies agree on `run` instead of colliding on it.
+
+### Unicode policy
+
+- Writers MUST emit only valid Unicode scalar strings. Lone UTF-16
+  surrogates MUST be replaced with U+FFFD plus a `data.notes` entry, keeping
+  a valid surrogate pair as its character; when two object keys collide after
+  replacement the writer MUST keep the first and note the collision.
+  Writing continues. JSON escapes of lone surrogates in legacy lines are
+  parsed leniently by readers and reported by every checker as the same
+  warning-level notice, never silently dropped.
 
 ### Detail levels
 

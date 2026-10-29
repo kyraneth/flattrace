@@ -1,0 +1,27 @@
+{
+  "events": {
+    "annotate": {
+      "fields": {
+        "detector": "calling detector identity"
+      },
+      "kind": "span"
+    },
+    "annotation": {
+      "fields": {
+        "label": "detector suggestion label"
+      },
+      "kind": "point"
+    },
+    "run": {
+      "fields": {},
+      "kind": "span"
+    },
+    "verdict": {
+      "fields": {
+        "reason": "grader explanation"
+      },
+      "kind": "point"
+    }
+  },
+  "tool": "plugin"
+}

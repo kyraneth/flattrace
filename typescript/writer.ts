@@ -67,6 +67,27 @@ export function sanitizeArgv(argv: string[]): string[] {
 }
 type Normalization = { notes: Set<string>; active: Set<object> };
 function normalization(): Normalization { return { notes: new Set(), active: new Set() }; }
+// Writers emit only valid Unicode scalar strings: lone surrogates become
+// U+FFFD with a degradation note, like the Python writer. Valid pairs stay.
+function replaceSurrogates(value: string, state: Normalization): string {
+  if (!/[\ud800-\udfff]/.test(value)) return value;
+  let out = '';
+  for (let i = 0; i < value.length; i++) {
+    const code = value.charCodeAt(i);
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(i + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) { out += value[i] + value[i + 1]; i++; continue; }
+      state.notes.add('lone surrogate replaced with U+FFFD');
+      out += '\ufffd';
+    } else if (code >= 0xdc00 && code <= 0xdfff) {
+      state.notes.add('lone surrogate replaced with U+FFFD');
+      out += '\ufffd';
+    } else {
+      out += value[i];
+    }
+  }
+  return out;
+}
 function representation(value: unknown): string {
   try { return String(value); } catch { return '<unserializable value>'; }
 }
@@ -81,10 +102,11 @@ function numbers(value: unknown, state: Normalization): Json {
     if (!Number.isFinite(value)) { state.notes.add('non-finite number replaced with null'); return null; }
     return value;
   }
-  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (value === null || typeof value === 'boolean') return value;
+  if (typeof value === 'string') return replaceSurrogates(value, state);
   if (typeof value !== 'object') {
     state.notes.add('unserializable value replaced with text');
-    return representation(value);
+    return replaceSurrogates(representation(value), state);
   }
   if (state.active.has(value)) {
     state.notes.add('circular reference replaced with text');
@@ -99,10 +121,18 @@ function numbers(value: unknown, state: Normalization): Json {
     // Snapshot once; do not invoke caller toJSON hooks. Preserve sparse nulls and __proto__.
     if (Array.isArray(value)) return Array.from({ length: value.length }, (_, i) => i in value ? read(String(i)) : null);
     if (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null) {
-      return Object.fromEntries(Object.keys(value).map(key => [key, read(key)]));
+      const entries: [string, Json][] = [];
+      const seen = new Set<string>();
+      for (const key of Object.keys(value)) {
+        const safe = replaceSurrogates(key, state);
+        if (seen.has(safe)) { state.notes.add('object keys collide after surrogate replacement'); continue; }
+        seen.add(safe);
+        entries.push([safe, read(key)]);
+      }
+      return Object.fromEntries(entries);
     }
     state.notes.add('unserializable value replaced with text');
-    return representation(value);
+    return replaceSurrogates(representation(value), state);
   } catch {
     state.notes.add('unserializable value replaced with text');
     return '<unserializable value>';
@@ -191,9 +221,10 @@ export class Writer {
     const normalizationState = normalization();
     data = object(data, normalizationState);
     extra = object(extra, normalizationState);
+    const envelope = object({ tool: this.tool, tool_version: this.tool_version,
+      run: this.run, trace: this.trace, span, parent, event, state }, normalizationState);
     for (const note of [...normalizationState.notes].sort()) data = addNote(data, note);
-    const row = { v: 1, seq: this.seq++, tool: this.tool, tool_version: this.tool_version,
-      run: this.run, trace: this.trace, span, parent, event, state,
+    const row = { v: 1, seq: this.seq++, ...envelope,
       t: new Date().toISOString(), data, ...extra };
     let line: string;
     try { line = JSON.stringify(row); }

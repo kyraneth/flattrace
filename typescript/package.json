@@ -1,6 +1,6 @@
 {
   "name": "flattrace",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Small local JSONL traces with cross-process parentage",
   "author": "Mario Hawat <4396100+kyraneth@users.noreply.github.com>",
   "repository": {
@@ -42,6 +42,7 @@
     "dist/reader.js",
     "dist/reader.d.ts",
     "native/*.node",
+    "schema/conventions-events.json",
     "README.md",
     "LICENSE"
   ],

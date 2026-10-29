@@ -11,7 +11,7 @@ from flattrace.check import read_trace
 def observations(files):
     runs, verdicts = {}, []
     for path in files:
-        rows, issues = read_trace(path)
+        rows, issues, _ = read_trace(path)
         if issues:
             continue  # Unfinished/malformed records never become successful rewards.
         first, last = rows[0], rows[-1]

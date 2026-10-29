@@ -2,16 +2,19 @@
   {
     "file": "c01-parent.jsonl",
     "issues": [],
+    "notices": [],
     "rows": 6
   },
   {
     "file": "c02-child.jsonl",
     "issues": [],
+    "notices": [],
     "rows": 3
   },
   {
     "file": "c03-async.jsonl",
     "issues": [],
+    "notices": [],
     "rows": 10
   },
   {
@@ -25,16 +28,19 @@
       "unfinished span 2222222222222222: missing end",
       "unfinished span 3333333333333333: missing end"
     ],
+    "notices": [],
     "rows": 5
   },
   {
     "file": "c05-dup-a.jsonl",
     "issues": [],
+    "notices": [],
     "rows": 4
   },
   {
     "file": "c05-dup-b.jsonl",
     "issues": [],
+    "notices": [],
     "rows": 4
   },
   {
@@ -45,26 +51,31 @@
       "unfinished span 1111111111111111: missing end",
       "unfinished span 2222222222222222: missing end"
     ],
+    "notices": [],
     "rows": 2
   },
   {
     "file": "c07-payload.jsonl",
     "issues": [],
+    "notices": [],
     "rows": 9
   },
   {
     "file": "c08-baseline.jsonl",
     "issues": [],
+    "notices": [],
     "rows": 7
   },
   {
     "file": "c09-candidate.jsonl",
     "issues": [],
+    "notices": [],
     "rows": 7
   },
   {
     "file": "c10-archive.jsonl.gz",
     "issues": [],
+    "notices": [],
     "rows": 3
   },
   {
@@ -77,6 +88,7 @@
       "seq gap or reordering: expected 2, got 4",
       "unfinished span 1111111111111111: missing end"
     ],
+    "notices": [],
     "rows": 3
   }
 ]
