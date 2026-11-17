@@ -1,9 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Exercise the reachable workflow shell guard without publishing anything."""
-import os
-import re
-import subprocess
-import tempfile
+"""Guard the intended build and publication boundaries."""
 import unittest
 from pathlib import Path
 
@@ -11,23 +7,14 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ReleaseGuardTests(unittest.TestCase):
-    def test_npm_source_guard(self):
-        workflow = (ROOT / ".github/workflows/release.yml").read_text()
-        job = workflow.split("\n  publish-npm:\n", 1)[1].split("\n  publish-cli:", 1)[0]
-        step = job.split("- name: Check npm source and provenance commits\n", 1)[1].split("\n      - name:", 1)[0]
-        self.assertIn("WORKFLOW_SHA: ${{ github.sha }}", step)
-        script = re.sub(r"^          ", "", step.split("run: |\n", 1)[1], flags=re.M)
-        self.assertNotIn("checkout@", job)
-        self.assertNotIn("npm run build", job)
-        self.assertIn("NPM_CONFIG_IGNORE_SCRIPTS: 'true'", job)
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            (root / "dist").mkdir()
-            (root / "dist/source-commit.txt").write_text("a" * 40 + "\n")
-            for ref, workflow_sha, expected in [("a", "a", 0), ("b", "a", 1), ("a", "b", 1)]:
-                (root / "release-commit.txt").write_text(ref * 40 + "\n")
-                result = subprocess.run(["bash", "-e", "-c", script], cwd=root,
-                                        env={**os.environ, "RUNNER_TEMP": directory,
-                                             "WORKFLOW_SHA": workflow_sha * 40},
-                                        capture_output=True, text=True)
-                self.assertEqual(result.returncode, expected, result.stderr)
+    def test_only_configured_github_environments_and_no_registry_token_publishes(self):
+        workflow = (ROOT / '.github/workflows/release.yml').read_text()
+        import re
+        self.assertEqual(set(re.findall(r'^    environment: (\S+)$', workflow, re.M)), {'pypi', 'cli'})
+        self.assertNotRegex(workflow, r'(?m)^  publish-(npm|crates):')
+        self.assertNotRegex(workflow, r'(?m)^\s+- (npm|crates)$')
+        self.assertNotIn('cargo +1.94.1 publish', workflow)
+        self.assertNotIn('npm publish', workflow)
+        self.assertIn('uv publish --trusted-publishing always', workflow)
+        self.assertIn('cargo +1.94.1 package --locked', workflow)
+        self.assertIn('cli/* crates/*.crate | tee SHA256SUMS', workflow)

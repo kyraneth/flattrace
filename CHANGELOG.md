@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.1
+
+- Use a fresh release number because several different builds carried 0.3.0.
+  The reviewed 0.3.0 source is unchanged apart from package version metadata
+  and this release note; release artifacts must be built once and reviewed
+  by their exact hashes before publication.
+
 ## 0.3.0
 
 - Composition checker (#10): `check(paths, events=[...], command?)` and
