@@ -78,7 +78,7 @@ jobs:
 
   wheels-abi3-macos:
     if: inputs.target == 'build'
-    runs-on: macos-14
+    runs-on: macos-15
     permissions:
       contents: read
     steps:
@@ -156,7 +156,7 @@ jobs:
 
   node-macos:
     if: inputs.target == 'build'
-    runs-on: macos-14
+    runs-on: macos-15
     permissions:
       contents: read
     steps:
@@ -224,7 +224,7 @@ jobs:
 
   cli-macos:
     if: inputs.target == 'build'
-    runs-on: macos-14
+    runs-on: macos-15
     permissions:
       contents: read
     steps:
